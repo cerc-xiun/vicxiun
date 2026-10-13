@@ -4,6 +4,12 @@ __pycache__/
 .venv/
 venv/
 
+# Build and test artefacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
 # Downloaded media -- large binaries, never commit
 downloads/
 
