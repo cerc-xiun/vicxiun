@@ -8,6 +8,8 @@ scope; a refusal stated up front costs the user less time than a failure
 discovered halfway through a Queue.
 
 **_Rejected_**: using the user's own account to reach content they already have
-access to. It is deferred rather than forbidden forever — but not in this
-milestone, because it would make the tool's behaviour depend on a site's terms
-and put credentials somewhere the project promised to keep them out of.
+access to. That mechanism is deferred rather than forbidden forever, but not in
+this milestone, because it would make the tool's behaviour depend on a site's
+terms and put credentials somewhere the project promised to keep them out of.
+It is a separate matter from the refusal above: DRM-protected and paywalled
+content stays out of scope permanently, whatever credentials the user holds.

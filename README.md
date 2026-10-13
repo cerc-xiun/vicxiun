@@ -49,8 +49,8 @@ uv run pytest
 
 That single command runs the whole suite. The tests exercise the installed
 command line — arguments in, output and exit codes out — and no test reaches
-the network. CI runs the same command on Windows and Linux, on every push to
-`main` and every pull request.
+the network. CI runs the same command on Windows and Linux, on every push and
+every pull request.
 
 ## Installing it
 

@@ -10,8 +10,7 @@ way.
 ### The work
 
 **Job**:
-All of the Items asked for in one run of the tool, handled together from first
-to last.
+All of the Items asked for in one command, handled together from first to last.
 _Avoid_: batch, session, task, run
 
 **Item**:
@@ -43,8 +42,8 @@ _Avoid_: preset, mode, quality, format
 **Plan**:
 What the tool intends to do with one Item: whether it is a Download or a
 Capture, its Profile, the format chosen for it, and the absolute path its file
-would take. A real run prints the Plan and carries it out; a preview prints it
-and stops.
+would take. The tool prints the Plan and then carries it out; a preview prints
+it and stops.
 _Avoid_: dry run, forecast
 
 ### The outside world
