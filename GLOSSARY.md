@@ -20,8 +20,8 @@ Capture.
 _Avoid_: entry, request, task, video
 
 **Download**:
-An Item whose link points at a finished video, kept as a single file with its
-picture and sound already together.
+An Item whose link points at a finished video, kept as one playable file
+holding both picture and sound.
 _Avoid_: fetch, grab, save
 
 **Capture**:
@@ -30,9 +30,7 @@ it is deliberately stopped, and left playable even when it ends unexpectedly.
 _Avoid_: recording, stream download, rip
 
 **Queue**:
-The strictly sequential handling of a Job's Items: one at a time, in order,
-skipping what is already on disk and continuing past an Item that fails. A
-Capture waiting for its stream to begin blocks the Queue.
+The strictly sequential handling of a Job's Items, one at a time and in order.
 _Avoid_: playlist, pool, batch, parallel processing
 
 ### What you ask for
