@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vicxiun"
+description = "Download finished videos and capture live streams, built on yt-dlp."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+authors = [{ name = "cerc-xiun" }]
+keywords = ["yt-dlp", "download", "live-stream", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Video",
+]
+
+# Declared, not fetched: both are ordinary dependencies. vicxiun never
+# downloads or executes code at runtime.
+dependencies = [
+    "yt-dlp",
+    "yt-dlp-ejs",
+]
+
+[project.scripts]
+vicxiun = "vicxiun.cli:main"
+
+[project.urls]
+Repository = "https://github.com/cerc-xiun/vicxiun"
+Issues = "https://github.com/cerc-xiun/vicxiun/issues"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.version]
+path = "src/vicxiun/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vicxiun"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

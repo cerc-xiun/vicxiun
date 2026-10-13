@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # The declared floor and the version this project is developed on.
+        # The classifiers advertise 3.10 through 3.14, so both ends of that
+        # range are exercised here rather than assumed.
+        python: ["3.10", "3.14"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+
+      - name: Check the lockfile is up to date and sync the environment
+        run: uv sync --locked
+
+      - name: Run the test suite
+        run: uv run pytest
