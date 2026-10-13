@@ -1,0 +1,18 @@
+@'
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.agents/
+.opencode/
+AGENTS.md
+
+# Downloaded media — large binaries, never commit
+downloads/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+'@ | Set-Content -Encoding utf8 .gitignore
