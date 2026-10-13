@@ -1,18 +1,16 @@
-@'
 # Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 
-.agents/
-.opencode/
-AGENTS.md
-
-# Downloaded media — large binaries, never commit
+# Downloaded media -- large binaries, never commit
 downloads/
+
+# Installed skill bodies; restore with: npx skills experimental_install
+.agents/skills/
+.opencode/skills/
 
 # OS / editor
 .DS_Store
 Thumbs.db
-'@ | Set-Content -Encoding utf8 .gitignore
