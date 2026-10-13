@@ -19,6 +19,23 @@ calls `grilling` and `domain-modeling` internally, both of which are installed.
 `ask-matt` is a router over the wider `mattpocock/skills` repo. Only a subset of
 its targets is installed here, so it is partially functional by design.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs for this repo live as GitHub issues in `cerc-xiun/vicxiun`,
+managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles map to identical label strings. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and one `docs/adr/` at the repo root. See
+`docs/agents/domain.md`.
+
 ## Provenance
 
 All skills come from `mattpocock/skills` and are pinned by content hash in
