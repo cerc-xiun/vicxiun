@@ -11,6 +11,7 @@ import argparse
 from collections.abc import Sequence
 
 from vicxiun import __version__
+from vicxiun.prereqs import run as run_prereq_check
 
 PROG = "vicxiun"
 
@@ -32,5 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command described by ``argv`` and return the exit code."""
     parser = build_parser()
+    # Parse first so ``--version`` and ``--help`` work even when a
+    # Prerequisite program is missing -- those flags are how a user
+    # debugs a missing-program report.
     parser.parse_args(argv)
-    return 0
+    return run_prereq_check()
