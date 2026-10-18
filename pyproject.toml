@@ -41,7 +41,10 @@ Repository = "https://github.com/cerc-xiun/vicxiun"
 Issues = "https://github.com/cerc-xiun/vicxiun/issues"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.17.1",
+]
 
 [tool.hatch.version]
 path = "src/vicxiun/__init__.py"
