@@ -37,17 +37,28 @@ from vicxiun.errors import (
     RefusedContent,
     UserError,
 )
-from vicxiun.plan import DownloadKind, Plan, profile_from_name
+from vicxiun.plan import CaptureKind, DownloadKind, Plan, profile_from_name
 
 
 def _make_plan(url: str = "https://example.com/v") -> Plan:
-    """A small Plan for unit tests; target is a stable path."""
+    """A small Download Plan for unit tests; target is a stable path."""
     return Plan(
         url=url,
         kind=DownloadKind(),
         profile=profile_from_name("phone-safe"),
         format_description="MP4 H.264 + AAC, up to 1080p",
         target_path=Path("/tmp/out/Some Channel/Title [abc].mp4"),
+    )
+
+
+def _make_capture_plan(url: str = "https://example.com/live") -> Plan:
+    """A small Capture Plan for unit tests; target is a stable MKV path."""
+    return Plan(
+        url=url,
+        kind=CaptureKind(),
+        profile=profile_from_name("capture"),
+        format_description="MKV, bestvideo+bestaudio until stopped",
+        target_path=Path("/tmp/out/Some Channel/Title [abc].mkv"),
     )
 
 
@@ -181,12 +192,36 @@ def test_executor_options_pin_the_target_path() -> None:
 
 
 def test_executor_options_for_a_capture_use_live_from_start() -> None:
-    """Capture-specific flags are deferred to ticket #9; the executor
-    options for any plan in this milestone do not include them.
+    """A Capture Plan sets ``live_from_start`` so yt-dlp records from the
+    earliest point the platform still holds -- the project's main use
+    case (issue #9, acceptance criterion "Recording begins from the
+    earliest point the platform still holds").
+    """
+    plan = _make_capture_plan()
+    opts = _build_executor_options(plan, None)
+    assert opts.get("live_from_start") is True
+
+
+def test_executor_options_for_a_capture_use_hls_mpegts() -> None:
+    """A Capture Plan sets ``hls_use_mpegts`` so the recording can be
+    muxed into MKV with each fragment appended live. An interrupted
+    MKV written this way remains playable; an interrupted MP4 does not
+    (ADR-0007).
+    """
+    plan = _make_capture_plan()
+    opts = _build_executor_options(plan, None)
+    assert opts.get("hls_use_mpegts") is True
+
+
+def test_executor_options_for_a_download_do_not_use_capture_flags() -> None:
+    """A Download Plan must not carry the live-stream flags. The
+    ``isinstance(kind, CaptureKind)`` discriminator must be the only
+    branch that turns them on, otherwise a finished video would be
+    recorded from "earliest available point" instead of downloaded.
     """
     plan = _make_plan()
     opts = _build_executor_options(plan, None)
-    for key in ("live_from_start", "wait_for_stream", "hls_use_mpegts"):
+    for key in ("live_from_start", "hls_use_mpegts"):
         assert key not in opts
 
 

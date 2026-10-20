@@ -27,7 +27,7 @@ from vicxiun.errors import (
     RefusedContent,
     UserError,
 )
-from vicxiun.plan import Plan
+from vicxiun.plan import CaptureKind, Plan
 
 # Recognise DRM / paywall phrases yt-dlp surfaces in its error messages.
 # The list is conservative: matches in yt-dlp's error string that look like
@@ -206,15 +206,22 @@ def _build_executor_options(
     absolute target path so yt-dlp writes the file in the right place
     on the first try.
 
-    Capture-specific flags (``live_from-start``, ``hls_use_mpegts``,
-    ``wait_for_stream``) land in ticket #9; this milestone downloads
-    finished videos only.
+    A Capture Plan additionally sets ``live_from_start`` (record from
+    the earliest point the platform still holds -- the main acceptance
+    criterion of #9) and ``hls_use_mpegts`` (each HLS segment is wrapped
+    in MPEG-TS so the MKV container can keep appending fragments and a
+    clean stop, deliberate or accidental, leaves a playable file per
+    ADR-0007). ``wait_for_stream`` is owned by ticket #11 and lands
+    when its polling logic does.
     """
     options = _safe_default_options()
     options["quiet"] = True
     options["no_warnings"] = True
     options["format"] = plan.profile.format_selector
     options["outtmpl"] = str(plan.target_path)
+    if isinstance(plan.kind, CaptureKind):
+        options["live_from_start"] = True
+        options["hls_use_mpegts"] = True
     if on_progress is not None:
         options["progress_hooks"] = [on_progress]
     return options
