@@ -20,10 +20,20 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _ci_like_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Pretend ffmpeg and node are not on PATH for every test."""
+def _ci_like_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
+    """Pretend ffmpeg and node are not on PATH for every test.
+
+    Also redirects the settings file into a temporary directory so no
+    test reads or writes the developer's real settings (ticket #16).
+    """
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setenv("PATH", "")
+    settings_dir = tmp_path_factory.mktemp("settings")
+    from vicxiun import cli
+
+    monkeypatch.setattr(cli, "settings_path", lambda: settings_dir / "settings.json")
     yield
 
 
