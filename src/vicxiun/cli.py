@@ -26,6 +26,9 @@ from vicxiun.plan import (
 )
 from vicxiun.prereqs import run as run_prereq_check
 from vicxiun.queue import ExecutorCallable, ResolverCallable, run_queue
+from vicxiun.settings import KNOWN_KEYS
+from vicxiun.settings import load as load_settings
+from vicxiun.settings import save as save_settings
 
 PROG = "vicxiun"
 
@@ -91,7 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=PROG,
-        description="Download finished videos and capture live streams.",
+        description=(
+            "Download finished videos and capture live streams.\n\n"
+            "Choices made once are remembered: run 'vicxiun settings' to "
+            "show or change saved settings. Any flag overrides a saved "
+            "value for that run only."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -117,11 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--profile",
-        default="phone-safe",
+        default=None,
         choices=tuple(sorted(PROFILES)),
         help=(
-            "Output Profile to use. The default (phone-safe) plays on any "
-            "phone without further thought; 'best' reaches for the "
+            "Output Profile to use. Defaults to your saved setting (see "
+            "'vicxiun settings'), else phone-safe, which plays on any "
+            "phone without further thought. 'best' reaches for the "
             "highest quality available; 'audio' yields audio only."
         ),
     )
@@ -129,7 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--folder",
         default=None,
         help=(
-            "Override the output folder. Defaults to the platform default "
+            "Override the output folder. Defaults to your saved setting "
+            "(see 'vicxiun settings'), else the platform default "
             "(~/Videos/vicxiun on PC, /sdcard/Movies/vicxiun on Termux). "
             "Relative paths are interpreted against the current directory."
         ),
@@ -146,8 +156,18 @@ def build_parser() -> argparse.ArgumentParser:
 def default_output_root() -> Path:
     """The platform's default output folder, with no per-user setup."""
     from vicxiun.platform import default_output_root as _default
-
     return _default()
+
+
+def settings_path() -> Path:
+    """The settings file, in the platform's configuration location.
+
+    Tests monkeypatch this so no test reads or writes the developer's
+    real settings file.
+    """
+    from vicxiun.platform import settings_path as _settings_path
+
+    return _settings_path()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -166,9 +186,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     The Prerequisite check still runs even with a link, so a missing
     ffmpeg is announced before anything else. ``--version`` and
     ``--help`` are handled by argparse before the check fires.
+    ``settings`` is dispatched by hand before argparse: the ``links``
+    positional takes every argument, so a subparser would swallow
+    links that merely look like words.
     """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "settings":
+        return _run_settings(argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Saved settings are consulted before the run; a flag given on
+    # this run wins for this run only and is never written back.
+    saved, warning = load_settings(settings_path())
+    if warning:
+        print(warning, file=sys.stderr)
 
     code = _run_prereq_check()
     if code != 0:
@@ -177,10 +210,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.links:
         parser.error("at least one LINK is required")
 
-    profile = profile_from_name(args.profile)
-    output_root = (
-        Path(args.folder).expanduser() if args.folder else default_output_root()
-    )
+    try:
+        profile = profile_from_name(
+            args.profile or saved.get("profile") or "phone-safe"
+        )
+    except UserError:
+        # A hand-edited settings file can hold an unknown Profile;
+        # fall back to the default rather than crash (ticket #16).
+        name = saved.get("profile", "")
+        print(
+            f"Ignoring unknown profile {name!r} in {settings_path()}; "
+            "using phone-safe.",
+            file=sys.stderr,
+        )
+        profile = profile_from_name("phone-safe")
+    folder = args.folder or saved.get("folder")
+    output_root = Path(folder).expanduser() if folder else default_output_root()
 
     if args.dry_run:
         return _run_dry_run(parser, args, profile, output_root)
@@ -265,3 +310,98 @@ def _run_real(
     )
     print(outcome.summary(), end="", file=sys.stderr)
     return outcome.exit_code()
+
+
+# ---------------------------------------------------------------------------
+# Settings command (ticket #16; no prereq check, no link needed)
+# ---------------------------------------------------------------------------
+
+_SETTINGS_USAGE = """\
+usage: vicxiun settings [KEY [VALUE]]
+
+Show or change saved settings. Without arguments, show every setting,
+its current value, and where the settings file lives.
+
+  vicxiun settings                show all settings
+  vicxiun settings profile        show one setting
+  vicxiun settings profile best   save a value
+
+Keys: {keys}. A flag on a normal run overrides a saved value for that
+run only and is never saved.
+""".format(keys=", ".join(KNOWN_KEYS))
+
+
+def _builtin_default(key: str) -> str:
+    """The value used when nothing is saved for ``key``."""
+    if key == "profile":
+        return "phone-safe"
+    return str(default_output_root())
+
+
+def _show(key: str, saved: dict[str, str]) -> None:
+    value = saved.get(key)
+    if value is None:
+        print(f"{key} = {_builtin_default(key)}  (built-in default)")
+    else:
+        print(f"{key} = {value}  (saved)")
+
+
+def _run_settings(args: list[str]) -> int:
+    """Show or change saved settings (ticket #16).
+
+    ``settings``            show every setting and its source
+    ``settings KEY``        show one setting
+    ``settings KEY VALUE``  save VALUE for KEY, for every later run
+    """
+    path = settings_path()
+    saved, warning = load_settings(path)
+    if warning:
+        print(warning, file=sys.stderr)
+
+    if args and args[0] in ("-h", "--help"):
+        print(_SETTINGS_USAGE, end="")
+        return 0
+
+    if not args:
+        for key in KNOWN_KEYS:
+            _show(key, saved)
+        print(f"Settings file: {path}")
+        return 0
+
+    key = args[0]
+    if key not in KNOWN_KEYS:
+        print(
+            f"error: unknown setting {key!r}; known settings: "
+            f"{', '.join(KNOWN_KEYS)}. Run 'vicxiun settings --help'.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if len(args) == 1:
+        _show(key, saved)
+        return 0
+
+    if len(args) > 2:
+        print(
+            f"error: unexpected arguments {' '.join(args[2:])!r}. "
+            "Run 'vicxiun settings --help'.",
+            file=sys.stderr,
+        )
+        return 2
+
+    value = args[1]
+    if not value:
+        print(f"error: {key} cannot be empty.", file=sys.stderr)
+        return 2
+    if key == "profile":
+        try:
+            profile_from_name(value)
+        except UserError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+    saved[key] = value
+    save_settings(path, saved)
+    print(f"Saved: {key} = {value}")
+    print(f"Settings file: {path}")
+    return 0
