@@ -37,15 +37,24 @@ from vicxiun.errors import (
     RefusedContent,
     UserError,
 )
-from vicxiun.plan import CaptureKind, DownloadKind, Plan, profile_from_name
+from vicxiun.plan import (
+    CaptureKind,
+    DownloadKind,
+    Plan,
+    Profile,
+    profile_from_name,
+)
 
 
-def _make_plan(url: str = "https://example.com/v") -> Plan:
+def _make_plan(
+    url: str = "https://example.com/v",
+    profile: Profile | None = None,
+) -> Plan:
     """A small Download Plan for unit tests; target is a stable path."""
     return Plan(
         url=url,
         kind=DownloadKind(),
-        profile=profile_from_name("phone-safe"),
+        profile=profile if profile is not None else profile_from_name("phone-safe"),
         format_description="MP4 H.264 + AAC, up to 1080p",
         target_path=Path("/tmp/out/Some Channel/Title [abc].mp4"),
     )
@@ -183,6 +192,39 @@ def test_executor_options_use_the_profile_format_selector() -> None:
     plan = _make_plan()
     opts = _build_executor_options(plan, None)
     assert opts["format"] == plan.profile.format_selector
+
+
+def test_executor_options_carry_the_profile_format_sort() -> None:
+    """The Profile's sort reaches yt-dlp alongside the selector.
+
+    The sort is where the Profile's real preferences live: the selector
+    only says which kind of stream to take. Without it the 1080p cap and
+    the codec preferences would simply not be applied (ticket #7).
+    """
+    plan = _make_plan()
+    opts = _build_executor_options(plan, None)
+    assert opts["format_sort"] == list(plan.profile.format_sort)
+    # And for the default Profile that sort really does cap the height.
+    assert "res:1080" in opts["format_sort"]
+
+
+def test_executor_options_carry_the_profile_merge_container() -> None:
+    """A Profile that names a container asks ffmpeg to produce it."""
+    plan = _make_plan()
+    opts = _build_executor_options(plan, None)
+    assert opts["merge_output_format"] == plan.profile.merge_output_format
+
+
+def test_executor_options_omit_an_unset_merge_container() -> None:
+    """A Profile with no container preference leaves the key out.
+
+    The ``audio`` Profile deliberately has none: naming MP3 would make
+    ffmpeg re-encode a perfectly good Opus-in-WebM source for no reason.
+    Leaving the key unset lets yt-dlp pick the compatible extension.
+    """
+    plan = _make_plan(profile=profile_from_name("audio"))
+    opts = _build_executor_options(plan, None)
+    assert "merge_output_format" not in opts
 
 
 def test_executor_options_pin_the_target_path() -> None:
