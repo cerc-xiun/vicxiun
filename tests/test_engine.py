@@ -42,7 +42,9 @@ def test_default_engine_disables_remote_component_fetching() -> None:
     option carries the right flag at engine construction time."""
     engine = build_default_engine()
     opts = engine.base_options()
-    assert opts.get("remote_components") in (None, False)
+    # ``remote_components`` must be falsy: an empty set, None or False
+    # all mean "off". An empty set is what yt-dlp itself treats as off.
+    assert not opts.get("remote_components")
     # yt-dlp 2025.04+ removed the ``enable_create_executable`` block;
     # we accept either the legacy or the current default. Update checks
     # are explicitly off.
