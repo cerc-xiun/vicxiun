@@ -77,15 +77,28 @@ class Profile:
     the same choice (codec/container/resolution) for ``--dry-run``.
     ``container`` is the file extension the real run produces.
 
-    The selector expressions are placeholders that pin the *shape* of the
-    Profile for this milestone; ticket #7 (Profiles and the phone-safe
-    default) owns the values.
+    ``format_sort`` and ``merge_output_format`` are the two companions to
+    the selector, and they carry most of the Profile's meaning. The
+    selector names *which streams* to take; the sort says *which of the
+    available streams are preferred*, in yt-dlp's own ordering language.
+
+    Selection deliberately uses the sort and not hard filter syntax.
+    A selector like ``bestvideo[vcodec^=avc1][height<=?1080]`` would
+    exclude every video without an H.264 stream, so a perfectly ordinary
+    upload with only VP9 would fail outright. ``res:1080``, ``vcodec:avc``
+    and ``acodec:aac`` are limit-form sort fields: they *demote* the
+    unwanted options to the back of the list without removing any, and
+    yt-dlp's ``bestvideo``/``bestaudio`` read the list from the end. The
+    result is that the wanted stream is chosen when it exists, and a
+    playable one is chosen when it does not (ADR-0002).
     """
 
     name: str
     format_selector: str
     format_description: str
     container: str
+    format_sort: tuple[str, ...] = ()
+    merge_output_format: str = ""
 
 
 _PROFILES: dict[str, Profile] = {
@@ -93,34 +106,62 @@ _PROFILES: dict[str, Profile] = {
     for p in (
         Profile(
             name="phone-safe",
-            format_selector=(
-                "bestvideo[vcodec^=avc1][height<=?1080]"
-                "+bestaudio[acodec^=mp4a]/best"
-            ),
+            # Separate video and audio where they exist; /best catches the
+            # older uploads that only ship one merged file. The ``*`` lets
+            # bestvideo take a stream that also carries audio, which keeps
+            # a single-file fallback available.
+            format_selector="bestvideo*+bestaudio/best",
             format_description="MP4, H.264 video + AAC audio, up to 1080p",
             container="mp4",
+            # res:1080 demotes 1440p and 2160p without excluding them.
+            # vcodec:avc and acodec:aac demote the codecs yt-dlp ranks
+            # above AVC and AAC (AV1, VP9.2, VP9, HEVC) without excluding
+            # them either. br breaks remaining ties the usual way.
+            format_sort=("res:1080", "vcodec:avc", "acodec:aac", "br"),
+            merge_output_format="mp4",
         ),
         Profile(
             name="best",
-            format_selector="bestvideo+bestaudio/best",
+            format_selector="bestvideo*+bestaudio/best",
             format_description=(
                 "bestvideo + bestaudio in the source container"
             ),
             container="mkv",
+            # No height cap and no codec preference: the user asked for the
+            # most the source has, so yt-dlp's own ordering is the answer.
+            format_sort=(),
+            merge_output_format="mkv",
         ),
         Profile(
             name="audio",
             format_selector="bestaudio/best",
             format_description="best audio stream",
             container="mp3",
+            # AAC where it exists, highest bit rate otherwise. Opus is
+            # demoted rather than excluded.
+            format_sort=("acodec:aac", "abr"),
+            # The merged container is left to ffmpeg's compatible-ext
+            # choice, so a good Opus-in-WebM source is not re-encoded to
+            # MP3 just to satisfy a container name.
+            merge_output_format="",
         ),
         Profile(
             name="capture",
-            format_selector="best",
+            # Not bare "best": in yt-dlp, "best" means a format that
+            # already carries both picture and sound, and it matches
+            # nothing at all on a live stream that publishes separate
+            # streams -- which is most of them. The explicit merge plus
+            # the /best fallback takes the separate streams when they
+            # are there and a merged file when they are not.
+            format_selector="bestvideo*+bestaudio/best",
             format_description=(
                 "bestvideo+bestaudio recorded as MKV until stopped"
             ),
             container="mkv",
+            # No cap and no codec preference: record what the stream
+            # offers rather than what a phone would want.
+            format_sort=(),
+            merge_output_format="mkv",
         ),
     )
 }

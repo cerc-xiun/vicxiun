@@ -202,9 +202,14 @@ def _build_executor_options(
     """Compose the yt-dlp options the executor uses for one plan.
 
     Starts from the safety defaults and adds the per-Item format,
-    output template and progress hook. The output template is the
-    absolute target path so yt-dlp writes the file in the right place
-    on the first try.
+    format sort, merge container, output template and progress hook. The
+    output template is the absolute target path so yt-dlp writes the file
+    in the right place on the first try.
+
+    The Profile's ``format_sort`` is layered in here rather than folded
+    into the selector, so the choice is expressed as a preference rather
+    than a requirement: an unusual video with no H.264 stream still
+    yields a playable file (ticket #7, ADR-0002).
 
     A Capture Plan additionally sets ``live_from_start`` (record from
     the earliest point the platform still holds -- the main acceptance
@@ -218,6 +223,17 @@ def _build_executor_options(
     options["quiet"] = True
     options["no_warnings"] = True
     options["format"] = plan.profile.format_selector
+    # The Profile's sort is what expresses its codec and resolution
+    # preferences. Passing it alongside the selector is what lets an
+    # unusual video degrade to a playable file instead of failing: the
+    # limit-form fields demote the unwanted formats without excluding
+    # them, so nothing is ever un-selectable (ADR-0002, ticket #7).
+    options["format_sort"] = list(plan.profile.format_sort)
+    if plan.profile.merge_output_format:
+        # Ask ffmpeg to produce this container when it has to merge audio
+        # and video. Left unset otherwise, so yt-dlp picks the compatible
+        # extension itself rather than re-encoding to satisfy us.
+        options["merge_output_format"] = plan.profile.merge_output_format
     options["outtmpl"] = str(plan.target_path)
     if isinstance(plan.kind, CaptureKind):
         options["live_from_start"] = True
