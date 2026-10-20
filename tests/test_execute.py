@@ -52,12 +52,19 @@ def _install_resolver(
     monkeypatch,
     mapping: dict[str, dict[str, object]],
 ) -> None:
+    """Install a fake resolver plus a passing Prereq check stub.
+
+    The Prereq check stub lets the tests exercise business logic
+    without requiring ffmpeg / node on the test machine's PATH. The
+    real Prereq check has its own tests under ``tests/test_prereqs.py``.
+    """
     def resolver(url: str) -> dict[str, object]:
         if url not in mapping:
             raise UserError(f"engine cannot resolve {url}")
         return dict(mapping[url])
 
     monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
 
 
 def _install_executor(

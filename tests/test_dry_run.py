@@ -35,7 +35,12 @@ def _install_fake_resolver(monkeypatch, mapping):
     The resolver is plugged into the CLI's seam so the CLI uses no real
     network. The mapping is a dict from URL to the dict the resolver
     yields.
+
+    A passing Prereq check stub is also installed so the CLI does not
+    refuse to run because the test machine lacks ffmpeg/node on PATH.
+    The real Prereq check is tested under ``tests/test_prereqs.py``.
     """
+    from vicxiun import cli as _cli
 
     def resolver(url):
         if url not in mapping:
@@ -43,7 +48,8 @@ def _install_fake_resolver(monkeypatch, mapping):
             raise UserError(f"engine cannot resolve {url}")
         return dict(mapping[url])
 
-    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(_cli, "_resolver", resolver)
+    monkeypatch.setattr(_cli, "_prereq_check", lambda: 0)
 
 
 _BASIC_DOWNLOAD = {

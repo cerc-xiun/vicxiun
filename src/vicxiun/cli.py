@@ -48,6 +48,7 @@ PROG = "vicxiun"
 # executor receives a Plan and an optional progress callback.
 _resolver: ResolverCallable | None = None
 _executor: ExecutorCallable | None = None
+_prereq_check: Callable[[], int] | None = None
 
 
 def set_resolver(resolver: ResolverCallable) -> None:
@@ -60,6 +61,25 @@ def set_executor(executor: ExecutorCallable) -> None:
     """Replace the executor used by ``main`` (test seam)."""
     global _executor
     _executor = executor
+
+
+def set_prereq_check(prereq_check: Callable[[], int]) -> None:
+    """Replace the Prereq check used by ``main`` (test seam).
+
+    Tests that exercise business logic through the CLI install a
+    no-op here so they do not depend on ffmpeg / node being on the
+    test machine's ``PATH``. The prereq check itself is tested
+    separately under ``tests/test_prereqs.py``.
+    """
+    global _prereq_check
+    _prereq_check = prereq_check
+
+
+def _run_prereq_check() -> int:
+    """Honour the test seam if one is installed; else run the real check."""
+    if _prereq_check is not None:
+        return _prereq_check()
+    return run_prereq_check()
 
 
 def _resolve_metadata(url: str) -> dict[str, object]:
@@ -174,7 +194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    code = run_prereq_check()
+    code = _run_prereq_check()
     if code != 0:
         return code
 
