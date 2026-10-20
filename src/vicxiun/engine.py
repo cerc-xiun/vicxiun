@@ -20,13 +20,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, TextIO
 
+from yt_dlp.utils import DownloadError
+
 from vicxiun.errors import (
     PrerequisiteMissing,
     RefusedContent,
-    UnexpectedFailure,
     UserError,
 )
-from vicxiun.plan import CaptureKind, Plan
+from vicxiun.plan import Plan
 
 # Recognise DRM / paywall phrases yt-dlp surfaces in its error messages.
 # The list is conservative: matches in yt-dlp's error string that look like
@@ -43,12 +44,12 @@ _DRM_PHRASES = (
     "subscription required",
 )
 # yt-dlp phrases that mean a Prerequisite program (almost always ffmpeg
-# these days) is missing from the machine.
+# these days) is missing from the machine. Kept narrow on purpose: a
+# vague phrase like "no such file" will match almost any error and
+# cross-bleed into unrelated failure modes.
 _PREREQ_PHRASES = (
     "ffmpeg",
     "node",
-    "no such file",
-    "executable",
 )
 
 
@@ -112,16 +113,13 @@ class YtDlpEngine:
 
         Any ``yt_dlp.DownloadError`` raised by the executor (real or
         substituted) is translated to one of ``vicxiun``'s named errors
-        at this seam. This is the right place for the translation: the
-        boundary is the same for the real run and for tests that
-        inject a DownloadError to verify the mapping.
+        at this seam. The boundary is the same for the real run and for
+        tests that inject a DownloadError to verify the mapping.
         """
         try:
             return self._executor(plan, on_progress)
-        except _DownloadError as exc:  # type: ignore[misc]
+        except DownloadError as exc:
             _translate_download_error(exc)
-            # Unreachable: _translate_download_error always raises.
-            raise UnexpectedFailure(str(exc)) from exc
 
     def base_options(self) -> dict[str, object]:
         return dict(self._options)
@@ -153,25 +151,18 @@ class YtDlpEngine:
     ) -> Path:
         """Run the plan through yt-dlp's Python API and return the file.
 
-        Maps yt-dlp's ``DownloadError`` to the project's named errors so
-        the CLI can give a stable exit code for each cause.
+        The actual ``yt_dlp.DownloadError`` translation happens in
+        ``execute()``, so the inner call here is plain: any error from
+        yt-dlp bubbles to the seam where it is mapped to a named error.
         """
         from yt_dlp import YoutubeDL
-        from yt_dlp.utils import DownloadError
 
         options = _build_executor_options(plan, on_progress)
 
-        try:
-            with YoutubeDL(options) as ydl:
-                # For a finished video we download; for a live stream we
-                # record with ``--live-from-start``. ``download=True`` is
-                # the default, but we set it explicitly so the call site
-                # is self-documenting.
-                ydl.download([plan.url])
-        except DownloadError as exc:
-            _translate_download_error(exc)
-            # Unreachable: _translate_download_error always raises.
-            raise UnexpectedFailure(str(exc)) from exc
+        with YoutubeDL(options) as ydl:
+            # ``download=True`` is the default; we set it explicitly so
+            # the call site is self-documenting.
+            ydl.download([plan.url])
 
         return plan.target_path
 
@@ -196,9 +187,6 @@ def _safe_default_options() -> dict[str, object]:
     return {
         "remote_components": set(),
         "cache": False,
-        # Disable yt-dlp's noisy progress; we emit our own.
-        "quiet": False,
-        "no_warnings": False,
         # Match ``yt-dlp -U``: the user runs the tool by choice, the tool
         # does not silently self-update.
         "updater": False,
@@ -215,32 +203,31 @@ def _build_executor_options(
 
     Starts from the safety defaults and adds the per-Item format,
     output template and progress hook. The output template is the
-    absolute target path so yt-dlp writes the file in the right place on
-    -- the first try.
+    absolute target path so yt-dlp writes the file in the right place
+    on the first try.
+
+    Capture-specific flags (``live_from-start``, ``hls_use_mpegts``,
+    ``wait_for_stream``) land in ticket #9; this milestone downloads
+    finished videos only.
     """
     options = _safe_default_options()
     options["quiet"] = True
     options["no_warnings"] = True
     options["format"] = plan.profile.format_selector
     options["outtmpl"] = str(plan.target_path)
-    # Captures record to MKV with live-from-start semantics.
-    if isinstance(plan.kind, CaptureKind):
-        options["hls_use_mpegts"] = True
-        options["live_from_start"] = True
-        options["wait_for_stream"] = bool(plan.wait_for_stream)
     if on_progress is not None:
         options["progress_hooks"] = [on_progress]
     return options
 
 
-def _translate_download_error(exc: BaseException) -> None:
+def _translate_download_error(exc: DownloadError) -> None:
     """Map a yt-dlp ``DownloadError`` to a named ``vicxiun`` error.
 
     The mapping is best-effort: phrases in the exception message are
     matched against DRM and Prerequisite keywords. Anything we cannot
     classify becomes ``UserError`` (the most common case: the link is
     dead, the video was removed, or the user typed something the engine
-    did not understand).
+    did not understand). The function always raises.
     """
     message = str(exc).lower()
 
@@ -262,17 +249,6 @@ def _translate_download_error(exc: BaseException) -> None:
     # was removed, etc. We surface the message rather than wrapping it
     # in something opaque.
     raise UserError(f"could not download {exc}") from exc
-
-
-# Lazy-resolved type alias for the engine's download-error type. We do
-# not import ``yt_dlp`` at module load time (the test suite runs without
-# yt-dlp in some envs) so the class is fetched on first use.
-_DownloadError: type[BaseException]
-try:
-    from yt_dlp.utils import DownloadError as _DownloadError
-except ImportError:  # pragma: no cover - only triggers when yt-dlp missing
-    class _DownloadError(BaseException):  # type: ignore[no-redef]
-        """Placeholder used only when yt-dlp is not importable."""
 
 
 # ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ from vicxiun.errors import (
     RefusedContent,
     UserError,
 )
-from vicxiun.plan import CaptureKind, DownloadKind, Plan, profile_from_name
+from vicxiun.plan import DownloadKind, Plan, profile_from_name
 
 
 def _make_plan(url: str = "https://example.com/v") -> Plan:
@@ -152,10 +152,9 @@ def test_safe_default_options_disable_update() -> None:
 
 
 def test_safe_default_options_disable_telemetry() -> None:
-    """Ticket #8 acceptance: no telemetry opt-in flag is positive."""
+    """Ticket #8 acceptance: the telemetry flag is explicitly off."""
     opts = _safe_default_options()
-    for key in ("enable_telemetry", "telemetry"):
-        assert opts.get(key) in (None, False, "off")
+    assert opts.get("enable_telemetry") is False
 
 
 def test_safe_default_options_disable_cache() -> None:
@@ -167,17 +166,6 @@ def test_safe_default_options_disable_cache() -> None:
 # ---------------------------------------------------------------------------
 # Executor option composition -- format, output template, capture options
 # ---------------------------------------------------------------------------
-
-
-def _capture_plan() -> Plan:
-    return Plan(
-        url="https://example.com/live",
-        kind=CaptureKind(),
-        profile=profile_from_name("capture"),
-        format_description="MKV until stopped",
-        target_path=Path("/tmp/out/Some Channel/Stream [live].mkv"),
-        wait_for_stream=True,
-    )
 
 
 def test_executor_options_use_the_profile_format_selector() -> None:
@@ -193,17 +181,13 @@ def test_executor_options_pin_the_target_path() -> None:
 
 
 def test_executor_options_for_a_capture_use_live_from_start() -> None:
-    plan = _capture_plan()
-    opts = _build_executor_options(plan, None)
-    assert opts.get("live_from_start") is True
-    assert opts.get("wait_for_stream") is True
-    assert opts.get("hls_use_mpegts") is True
-
-
-def test_executor_options_for_a_download_omit_capture_flags() -> None:
+    """Capture-specific flags are deferred to ticket #9; the executor
+    options for any plan in this milestone do not include them.
+    """
     plan = _make_plan()
     opts = _build_executor_options(plan, None)
-    assert "live_from_start" not in opts or not opts["live_from_start"]
+    for key in ("live_from_start", "wait_for_stream", "hls_use_mpegts"):
+        assert key not in opts
 
 
 def test_executor_options_install_progress_hooks_when_given() -> None:
@@ -214,6 +198,20 @@ def test_executor_options_install_progress_hooks_when_given() -> None:
 
     opts = _build_executor_options(_make_plan(), hook)
     assert opts["progress_hooks"] == [hook]
+
+
+def test_executor_options_carry_the_safety_defaults() -> None:
+    """The executor must inherit the safety defaults so a regression in
+    ``_build_executor_options`` cannot silently re-enable anything.
+
+    Ticket #8 acceptance: update off, telemetry off, remote components
+    off, cache off.
+    """
+    opts = _build_executor_options(_make_plan(), None)
+    assert not opts.get("remote_components")
+    assert opts.get("cache") is False
+    assert opts.get("updater") is False
+    assert opts.get("enable_telemetry") is False
 
 
 # ---------------------------------------------------------------------------

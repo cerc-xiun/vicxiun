@@ -106,8 +106,9 @@ def test_real_run_writes_a_real_file_in_the_uploader_folder(
     assert "Best of 2024" in name
     assert "abc123XYZ" in name
     assert name.endswith(".mp4")
-    # The closing summary line: "N ok, M failed."
-    assert "1 ok, 0 failed" in captured.out
+    # The closing summary line: "N ok, M failed." (on stderr, alongside
+    # progress; the real run is a single coherent user-facing stream).
+    assert "1 ok, 0 failed" in captured.err
 
 
 def test_real_run_prints_one_line_per_item_describing_the_result(
@@ -130,8 +131,9 @@ def test_real_run_prints_one_line_per_item_describing_the_result(
     err = captured.err
     assert "https://example.com/fin" in err
     assert "ok" in err
-    # The closing summary on stdout.
-    assert "1 ok, 0 failed" in captured.out
+    # The closing summary line is on stderr too, so a single coherent
+    # stream carries everything the user sees while the run happens.
+    assert "1 ok, 0 failed" in captured.err
 
 
 def test_real_run_prints_progress_through_the_progress_printer(
@@ -261,6 +263,56 @@ def test_real_run_returns_unexpected_code_when_unexpected_raises(
     _install_executor(monkeypatch, raising)
     code = main(["--folder", str(tmp_path), "https://example.com/fin"])
     assert code == 5  # UnexpectedFailure
+
+
+def test_real_run_returns_refused_code_when_every_item_is_refused(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A Job where every Item fails with ``RefusedContent`` exits 4.
+
+    The acceptance criterion lists refused content as its own code,
+    distinct from unexpected (5) and partial (1).
+    """
+    _install_resolver(
+        monkeypatch,
+        {
+            "https://example.com/a": _BASIC_DOWNLOAD,
+            "https://example.com/b": _BASIC_DOWNLOAD,
+        },
+    )
+
+    def raising(plan, progress):
+        raise RefusedContent("DRM")
+
+    _install_executor(monkeypatch, raising)
+    code = main(
+        [
+            "--folder",
+            str(tmp_path),
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+    )
+    assert code == 4  # RefusedContent
+
+
+def test_real_run_does_not_swallow_keyboard_interrupt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``KeyboardInterrupt`` is ``BaseException``, not ``Exception``;
+    the broad ``except Exception`` at the boundary must not catch it.
+
+    We assert the executor's KeyboardInterrupt propagates out of
+    ``main`` so the user gets the conventional 130 exit.
+    """
+    _install_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
+
+    def raising(plan, progress):
+        raise KeyboardInterrupt()
+
+    _install_executor(monkeypatch, raising)
+    with pytest.raises(KeyboardInterrupt):
+        main(["--folder", str(tmp_path), "https://example.com/fin"])
 
 
 def test_real_run_returns_user_error_when_executor_raises_user_error(

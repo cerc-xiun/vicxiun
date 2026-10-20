@@ -5,34 +5,32 @@ exit code, and the per-Item progress printer. The download and capture
 logic is reached through the engine seam (``vicxiun.engine``); the CLI's
 job is to validate, dispatch and report.
 
-Ticket #8 wires the real download/capture paths through ``--execute``;
-``--dry-run`` continues to print Plans without downloading.
+Ticket #8 wires the real download paths through ``main``; ``--dry-run``
+continues to print Plans without downloading.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import traceback
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from vicxiun import __version__
 from vicxiun.engine import (
-    Engine,
     ExecutorCallable,
     ResolverCallable,
-    YtDlpEngine,
     build_default_engine,
     default_progress_printer,
 )
 from vicxiun.errors import (
+    EXIT_CODE,
     PartialSuccess,
     PrerequisiteMissing,
     RefusedContent,
     UnexpectedFailure,
     UserError,
-    exit_code_for,
 )
 from vicxiun.plan import (
     InvalidLinkError,
@@ -62,14 +60,6 @@ def set_executor(executor: ExecutorCallable) -> None:
     """Replace the executor used by ``main`` (test seam)."""
     global _executor
     _executor = executor
-
-
-def _build_engine() -> Engine:
-    """Return the engine the real run uses; honours any test seams."""
-    return YtDlpEngine(
-        resolver=_resolver,
-        executor=_executor,
-    )
 
 
 def _resolve_metadata(url: str) -> dict[str, object]:
@@ -157,8 +147,10 @@ def default_output_root() -> Path:
 def _render_one_line(link: str, outcome: str, detail: str) -> str:
     """Render the single line that describes one Item's result.
 
-    The line is the only output the real run emits per Item: it is
-    written to stdout so it composes with the closing summary.
+    The line is the only output the real run emits per Item, written
+    to stderr alongside progress and the closing summary, so a single
+    coherent stream carries everything the user sees while the run
+    happens.
     """
     return f"{link}: {outcome} ({detail})\n"
 
@@ -249,6 +241,48 @@ def _run_dry_run(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ItemResult:
+    """The outcome of one Item in the real run.
+
+    A successful Item carries no error; every failure carries an
+    instance of one of the typed error classes in ``vicxiun.errors``.
+    That makes the exit-code mapping a single ``EXIT_CODE`` lookup on
+    the most-specific exception, instead of a string-keyed table.
+    """
+
+    link: str
+    path: Path | None
+    error: BaseException | None
+
+
+_OUTCOME_LABELS: dict[type[BaseException], str] = {
+    RefusedContent: "refused",
+    PrerequisiteMissing: "missing prereq",
+    UserError: "user error",
+    UnexpectedFailure: "unexpected",
+}
+
+
+def _label_for(error: BaseException) -> str:
+    """Human-readable label for a named error."""
+    for cls in type(error).__mro__:
+        label = _OUTCOME_LABELS.get(cls)
+        if label is not None:
+            return label
+    return "error"
+
+
+def _record_failure(result: ItemResult) -> None:
+    """Print the per-Item failure line for ``result``."""
+    assert result.error is not None
+    label = _label_for(result.error)
+    print(
+        _render_one_line(result.link, label, str(result.error)).rstrip(),
+        file=sys.stderr,
+    )
+
+
 def _run_real(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -262,89 +296,109 @@ def _run_real(
     ``main()``: 0 if every Item succeeded, 1 for partial success,
     otherwise the named code for whatever failed.
     """
-    successes: list[tuple[str, Path]] = []
-    failures: list[tuple[str, str, BaseException]] = []
-    refused = False
-    prereq_missing = False
-
+    results: list[ItemResult] = []
     for link in args.links:
-        try:
-            plan = resolve_plan(
-                link,
-                profile,
-                output_root,
-                _resolve_metadata,
-                wait_for_stream=args.wait_for_stream,
-            )
-        except (InvalidLinkError, UserError) as exc:
-            failures.append((link, "user error", exc))
-            print(str(exc), file=sys.stderr)
-            continue
+        results.append(_run_one(link, profile, output_root, args.wait_for_stream))
 
-        # Announce what we are about to do. This is the user-visible
-        # contract: a line that names the link, what kind of Item it is,
-        # and where the file will land.
-        print(
-            f"{link}: {plan.kind.name} with profile {plan.profile.name}",
-            file=sys.stderr,
-        )
-        print(f"  target: {plan.target_path}", file=sys.stderr)
+    successes = [r for r in results if r.error is None]
+    failures = [r for r in results if r.error is not None]
 
-        progress = default_progress_printer()
-        try:
-            actual = _execute_plan(plan, progress)
-        except RefusedContent as exc:
-            refused = True
-            failures.append((link, "refused", exc))
-            print(_render_one_line(link, "refused", str(exc)).rstrip(),
-                  file=sys.stderr)
-            continue
-        except PrerequisiteMissing as exc:
-            prereq_missing = True
-            failures.append((link, "missing prerequisite", exc))
-            print(_render_one_line(link, "missing prereq", str(exc)).rstrip(),
-                  file=sys.stderr)
-            continue
-        except UserError as exc:
-            failures.append((link, "user error", exc))
-            print(_render_one_line(link, "user error", str(exc)).rstrip(),
-                  file=sys.stderr)
-            continue
-        except Exception as exc:  # noqa: BLE001 - boundary, mapped to 5
-            unexpected = UnexpectedFailure(str(exc))
-            failures.append((link, "unexpected", unexpected))
-            print(_render_one_line(link, "unexpected", str(exc)).rstrip(),
-                  file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            continue
-
-        successes.append((link, actual))
-        print(
-            _render_one_line(link, "ok", str(actual)).rstrip(),
-            file=sys.stderr,
-        )
-
-    # The one-line summary at the end is on stdout, so it composes with
-    # ``--dry-run``'s closing line for consistency.
-    print(_summary(successes, failures), end="")
+    # The one-line summary is on stderr, alongside the per-Item
+    # result lines and the progress lines, so a single coherent stream
+    # carries everything the user sees while the run happens.
+    print(_summary(successes, failures), end="", file=sys.stderr)
 
     if not failures:
         return 0
     if successes:
-        return exit_code_for(PartialSuccess(f"{len(successes)} succeeded, {len(failures)} failed"))
-    # All Items failed: pick the most-specific code.
-    if refused and not prereq_missing and all(c == "refused" for _, c, _ in failures):
-        return exit_code_for(RefusedContent())
-    if prereq_missing and all(c == "missing prerequisite" for _, c, _ in failures):
-        return exit_code_for(PrerequisiteMissing())
-    if all(c == "user error" for _, c, _ in failures):
-        return exit_code_for(UserError())
-    return exit_code_for(UnexpectedFailure())
+        return EXIT_CODE[PartialSuccess]
+    # All Items failed: the most-specific exception's exit code. We pick
+    # the most specific by walking the MROs and choosing the one whose
+    # class is a subclass of the others (the deepest named error).
+    deepest = _deepest_named(failures)
+    return EXIT_CODE[deepest]
+
+
+def _run_one(
+    link: str,
+    profile,
+    output_root: Path,
+    wait_for_stream: bool,
+) -> ItemResult:
+    """Run a single Item; return its outcome.
+
+    Progress lines and the per-Item one-line result are printed on
+    stderr. The caller aggregates ``ItemResult`` values into a summary.
+    """
+    try:
+        plan = resolve_plan(
+            link,
+            profile,
+            output_root,
+            _resolve_metadata,
+            wait_for_stream=wait_for_stream,
+        )
+    except (InvalidLinkError, UserError) as exc:
+        print(str(exc), file=sys.stderr)
+        return ItemResult(link=link, path=None, error=exc)
+
+    print(
+        f"{link}: {plan.kind.name} with profile {plan.profile.name}",
+        file=sys.stderr,
+    )
+    print(f"  target: {plan.target_path}", file=sys.stderr)
+
+    progress = default_progress_printer()
+    try:
+        actual = _execute_plan(plan, progress)
+    except Exception as exc:  # noqa: BLE001 - boundary, mapped to 5
+        # KeyboardInterrupt and SystemExit are BaseException, not
+        # Exception, so this branch does not swallow them. A user
+        # Ctrl-C still produces the conventional 130 exit.
+        named = _classify_failure(exc)
+        result = ItemResult(link=link, path=None, error=named)
+        _record_failure(result)
+        return result
+
+    result = ItemResult(link=link, path=actual, error=None)
+    print(_render_one_line(link, "ok", str(actual)).rstrip(), file=sys.stderr)
+    return result
+
+
+def _classify_failure(exc: BaseException) -> BaseException:
+    """Map a raised exception to the closest named error.
+
+    The engine seam already translates ``yt_dlp.DownloadError`` to a
+    named error; the CLI just normalises anything else to
+    ``UnexpectedFailure`` so the exit-code contract holds.
+    """
+    for cls in (RefusedContent, PrerequisiteMissing, UserError):
+        if isinstance(exc, cls):
+            return exc
+    return UnexpectedFailure(str(exc))
+
+
+def _deepest_named(failures: list[ItemResult]) -> type[BaseException]:
+    """Return the most-specific named-error class across ``failures``.
+
+    Used to pick an exit code when every Item failed: we honour the
+    most-specific cause rather than the order in which Items ran.
+    """
+    candidates: list[type[BaseException]] = []
+    for r in failures:
+        assert r.error is not None
+        candidates.append(type(r.error))
+    # Pick the deepest in the class hierarchy.
+    best = candidates[0]
+    for cls in candidates[1:]:
+        if issubclass(cls, best):
+            best = cls
+    return best
 
 
 def _summary(
-    successes: list[tuple[str, Path]],
-    failures: list[tuple[str, str, BaseException]],
+    successes: list[ItemResult],
+    failures: list[ItemResult],
 ) -> str:
     """Render the closing line that summarises the whole run."""
     ok = len(successes)
