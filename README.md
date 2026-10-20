@@ -13,9 +13,9 @@ of the design, not a limitation.
 
 ## Status
 
-Early. This is the Milestone 1 skeleton: the package installs and the `vicxiun`
-command exists, but the download and capture commands do not yet. `--version`
-and `--help` are all there is today.
+The package installs, the `vicxiun` command exists, and `--dry-run` resolves
+links into a printable Plan without downloading anything. The download and
+capture paths are next.
 
 ## Requirements
 
@@ -26,10 +26,11 @@ and `--help` are all there is today.
 ## Working on it
 
 ```console
-uv sync                  # create .venv and install everything declared
+uv sync                              # create .venv and install everything declared
 uv run vicxiun --version
 uv run vicxiun --help
-uv run pytest            # the test suite
+uv run vicxiun --dry-run <link>      # preview a Plan without downloading
+uv run pytest                        # the test suite
 ```
 
 `uv sync` is the only setup step. It creates `.venv/`, installs `vicxiun` into
@@ -39,7 +40,9 @@ in the committed `uv.lock`. Re-running it is cheap and changes nothing when
 nothing changed.
 
 `vicxiun --version` and `vicxiun --help` work as soon as `uv sync` has run,
-because `uv` puts the environment's scripts on `PATH` for `uv run`.
+because `uv` puts the environment's scripts on `PATH` for `uv run`. `--dry-run`
+runs the metadata request the real run would run, prints a Plan and stops;
+it creates no files anywhere.
 
 ## Tests
 
