@@ -56,6 +56,10 @@ EXIT_CODE: dict[type[Exception], int] = {
     UnexpectedFailure: 5,
 }
 
+# An interrupted run (the Queue stops, completed Items stay finished)
+# exits 130: the conventional 128 + SIGINT(2) shell convention.
+INTERRUPTED_EXIT_CODE = 130
+
 
 def exit_code_for(exc: BaseException) -> int:
     """Return the exit code for an exception, walking the MRO.
