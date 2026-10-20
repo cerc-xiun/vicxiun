@@ -9,7 +9,10 @@ build/
 dist/
 *.egg-info/
 .pytest_cache/
-.ruff_cache./
+.ruff_cache/
+
+# Git worktrees parked under the repo root
+.worktrees/
 
 # Downloaded media -- large binaries, never commit
 downloads/
