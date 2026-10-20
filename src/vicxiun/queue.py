@@ -5,7 +5,7 @@ It is deliberately simple and deliberately sequential:
 
 * One Item at a time, in the order the user typed the links. No
   concurrency -- a waiting Capture blocks the Queue, and that is
-  documented behaviour (user story 25).
+  documented in the Milestone 1 spec (issue #1).
 * A failed Item does not stop the rest. The Queue continues past any
   failure, which is the whole point of a session with many links.
 * Everything that happens is recorded. At the end the caller prints a
@@ -31,7 +31,6 @@ from pathlib import Path
 from vicxiun.engine import default_progress_printer
 from vicxiun.errors import (
     EXIT_CODE,
-    INTERRUPTED_EXIT_CODE,
     PartialSuccess,
     PrerequisiteMissing,
     RefusedContent,
@@ -188,14 +187,14 @@ class QueueOutcome:
     """Everything the caller needs after a Queue has run.
 
     ``results`` holds one ``ItemResult`` per Item that was *started*
-    (an interrupted in-progress Item is recorded as interrupted). Items
-    that were never started live in ``not_run``. ``interrupted`` is
-    True only when the run was stopped by an interrupt.
+    (an interrupted in-progress Item is recorded as interrupted).
+    ``interrupted`` is True only when the run was stopped by an
+    interrupt; the never-started Items are simply the links minus
+    ``results`` and are named in the summary.
     """
 
     links: tuple[str, ...]
     results: list[ItemResult]
-    not_run: tuple[str, ...] = ()
     interrupted: bool = False
 
     @property
@@ -220,11 +219,10 @@ class QueueOutcome:
             else:
                 lines.append(f"failed: {r.link} ({label_for(r.error)}: {r.error})")
         if self.interrupted:
-            not_run = len(self.links) - len(self.results)
-            lines.append(f"Interrupted: {not_run} Item(s) were not run.")
-        ok = len(self.successes)
-        bad = len(self.failures)
-        lines.append(f"{ok} ok, {bad} failed.")
+            not_started = len(self.links) - len(self.results)
+            lines.append(f"Interrupted: {not_started} Item(s) were not run.")
+        failures = self.failures
+        lines.append(f"{len(self.successes)} ok, {len(failures)} failed.")
         return "\n".join(lines) + "\n"
 
     def exit_code(self) -> int:
@@ -237,7 +235,7 @@ class QueueOutcome:
           cause's code is returned.
         """
         if self.interrupted:
-            return INTERRUPTED_EXIT_CODE
+            return EXIT_CODE[KeyboardInterrupt]
         failures = self.failures
         if not failures:
             return 0
@@ -264,7 +262,6 @@ def run_queue(
     Items that already finished are untouched.
     """
     results: list[ItemResult] = []
-    not_run: tuple[str, ...] = ()
     interrupted = False
     for index, link in enumerate(links):
         try:
@@ -292,12 +289,10 @@ def run_queue(
                     ),
                 )
             )
-            not_run = tuple(links[index + 1 :])
             break
     return QueueOutcome(
         links=tuple(links),
         results=results,
-        not_run=not_run,
         interrupted=interrupted,
     )
 
