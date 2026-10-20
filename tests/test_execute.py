@@ -58,6 +58,7 @@ def _install_resolver(
     without requiring ffmpeg / node on the test machine's PATH. The
     real Prereq check has its own tests under ``tests/test_prereqs.py``.
     """
+
     def resolver(url: str) -> dict[str, object]:
         if url not in mapping:
             raise UserError(f"engine cannot resolve {url}")
@@ -246,9 +247,7 @@ def test_real_run_returns_prerequisite_missing_code_when_executor_says_so(
     assert code == 3  # PrerequisiteMissing
 
 
-def test_real_run_returns_refused_code_when_drm(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_real_run_returns_refused_code_when_drm(tmp_path: Path, monkeypatch) -> None:
     _install_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
 
     def raising(plan, progress):
@@ -303,23 +302,68 @@ def test_real_run_returns_refused_code_when_every_item_is_refused(
     assert code == 4  # RefusedContent
 
 
-def test_real_run_does_not_swallow_keyboard_interrupt(
-    tmp_path: Path, monkeypatch
+def test_interrupt_stops_the_queue_and_completed_items_stay_intact(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """``KeyboardInterrupt`` is ``BaseException``, not ``Exception``;
-    the broad ``except Exception`` at the boundary must not catch it.
+    """AC (ticket #13): a run can be interrupted at any time without
+    corrupting completed Items.
 
-    We assert the executor's KeyboardInterrupt propagates out of
-    ``main`` so the user gets the conventional 130 exit.
+    An interrupt during Item 2 stops the Queue. Item 3 never starts,
+    Item 1's completed file is untouched, the summary names the
+    interrupted Item and the Items never run, and the exit code is the
+    conventional 130.
+
+    ``except Exception`` in the per-Item boundary must not catch
+    ``KeyboardInterrupt`` (it is ``BaseException``, not ``Exception``);
+    the Queue stops cleanly on it instead of recording it as a
+    download failure.
     """
-    _install_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
+    _install_resolver(
+        monkeypatch,
+        {
+            "https://example.com/a": _BASIC_DOWNLOAD,
+            "https://example.com/b": _BASIC_DOWNLOAD,
+            "https://example.com/c": _BASIC_DOWNLOAD,
+        },
+    )
 
-    def raising(plan, progress):
-        raise KeyboardInterrupt()
+    calls: list[str] = []
 
-    _install_executor(monkeypatch, raising)
-    with pytest.raises(KeyboardInterrupt):
-        main(["--folder", str(tmp_path), "https://example.com/fin"])
+    def fake_executor(plan, progress):
+        calls.append(plan.url)
+        if plan.url == "https://example.com/b":
+            raise KeyboardInterrupt("simulated Ctrl-C")
+        plan.target_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.target_path.write_bytes(b"COMPLETED CONTENT")
+        return plan.target_path
+
+    _install_executor(monkeypatch, fake_executor)
+
+    code = main(
+        [
+            "--folder",
+            str(tmp_path),
+            "https://example.com/a",
+            "https://example.com/b",
+            "https://example.com/c",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 130  # the conventional interrupted-run exit
+    # Item 3 never started.
+    assert calls == ["https://example.com/a", "https://example.com/b"]
+    # Item 1's completed file is intact.
+    files = list((tmp_path / "Some Channel").iterdir())
+    assert len(files) == 1
+    assert files[0].read_bytes() == b"COMPLETED CONTENT"
+    # The summary lists what succeeded, what failed and why, and the
+    # Items that were never run.
+    err = captured.err
+    assert "ok: https://example.com/a" in err
+    assert "failed: https://example.com/b (interrupted" in err
+    assert "Interrupted: 1 Item(s) were not run." in err
+    assert "1 ok, 1 failed." in err
 
 
 def test_real_run_returns_user_error_when_executor_raises_user_error(

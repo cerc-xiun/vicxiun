@@ -48,12 +48,15 @@ class UnexpectedFailure(Exception):
     """
 
 
-EXIT_CODE: dict[type[Exception], int] = {
+EXIT_CODE: dict[type[BaseException], int] = {
     UserError: 2,
     PrerequisiteMissing: 3,
     RefusedContent: 4,
     PartialSuccess: 1,
     UnexpectedFailure: 5,
+    # An interrupted run exits 130: the conventional 128 + SIGINT(2)
+    # shell convention. The Queue stops, completed Items stay finished.
+    KeyboardInterrupt: 130,
 }
 
 
