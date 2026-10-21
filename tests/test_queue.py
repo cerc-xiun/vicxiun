@@ -56,7 +56,9 @@ def test_several_links_in_one_command_are_processed_one_after_another(
         "https://example.com/b",
         "https://example.com/c",
     ]
-    install_resolver(monkeypatch, {link: BASIC_DOWNLOAD for link in links})
+    install_resolver(
+        monkeypatch, {link: {**BASIC_DOWNLOAD, "video_id": f"id{link[-1]}"} for link in links}
+    )
 
     ran: list[str] = []
     threads: set[int] = set()
@@ -99,8 +101,11 @@ def test_a_failed_item_does_not_stop_the_rest(
     install_resolver(
         monkeypatch,
         {
-            "https://example.com/a": BASIC_DOWNLOAD,
-            "https://example.com/dead": BASIC_DOWNLOAD,
+            "https://example.com/a": {**BASIC_DOWNLOAD, "video_id": "idAAA"},
+            "https://example.com/dead": {
+                **BASIC_DOWNLOAD,
+                "video_id": "idDEAD",
+            },
             "https://example.com/c": {
                 **BASIC_DOWNLOAD,
                 "video_id": "idCCC",
@@ -184,8 +189,14 @@ def test_the_summary_lists_what_succeeded_what_failed_and_why(
     install_resolver(
         monkeypatch,
         {
-            "https://example.com/good": BASIC_DOWNLOAD,
-            "https://example.com/drm": BASIC_DOWNLOAD,
+            "https://example.com/good": {
+                **BASIC_DOWNLOAD,
+                "video_id": "idGOOD",
+            },
+            "https://example.com/drm": {
+                **BASIC_DOWNLOAD,
+                "video_id": "idDRM",
+            },
         },
     )
 
@@ -246,7 +257,10 @@ def test_the_exit_code_reflects_the_mix_of_outcomes(
 ) -> None:
     """AC (ticket #13): the exit code reflects partial success."""
     links = [f"https://example.com/{chr(ord('a') + i)}" for i in range(total)]
-    install_resolver(monkeypatch, {link: BASIC_DOWNLOAD for link in links})
+    install_resolver(
+        monkeypatch,
+        {link: {**BASIC_DOWNLOAD, "video_id": f"id{i}"} for i, link in enumerate(links)},
+    )
     failing = set(links[:failing_count])
 
     def fail_first_n(plan, progress):

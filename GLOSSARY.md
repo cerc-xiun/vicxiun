@@ -34,6 +34,12 @@ A waiting Capture blocks it; running one in a separate terminal is the
 documented workaround.
 _Avoid_: playlist, pool, batch, parallel processing
 
+**Skip record**:
+The file kept beside the output that remembers which Items were already
+finished, so re-running the same Queue skips them instead of fetching them
+again. It is not a history: it holds only what is done, one link per line.
+_Avoid_: history, log, archive, cache
+
 ### What you ask for
 
 **Profile**:

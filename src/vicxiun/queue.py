@@ -15,6 +15,13 @@ It is deliberately simple and deliberately sequential:
   stay finished -- their files are complete and untouched -- and the
   remaining Items are named as not run. The Job exits with the
   conventional 130 code so scripts can tell interruption from failure.
+* An Item the user already has is skipped, not fetched again (ticket
+  #14). "Already has it" is decided before any network request: an
+  exact-URL skip record beside the output names what earlier runs
+  finished, and an Item whose target file is already on disk is
+  skipped after resolution. Both are recorded, so re-running a
+  completed Queue downloads nothing. ``skip_existing=False`` (the CLI's
+  ``--no-skip``) turns the skipping off.
 
 The engine seam is injected (``resolver`` and ``executor`` callables),
 so no test for the Queue itself reaches the network. The CLI wires the
@@ -54,6 +61,75 @@ ExecutorCallable = Callable[[Plan, Callable[[dict[str, object]], None] | None], 
 # (ticket #11). Seconds; overridable with ``--wait-interval``.
 DEFAULT_WAIT_INTERVAL = 60
 
+# The skip record lives alongside the output (ticket #14): a plain
+# text file in the output root, one URL per line.
+SKIP_RECORD_NAME = ".vicxiun-done.txt"
+
+
+class SkipRecord:
+    """Which Items are already done, kept beside the output (ticket #14).
+
+    A plain text file (``SKIP_RECORD_NAME`` in the output root), one
+    URL per line, in the order they were finished. The match against a
+    link is the exact string the user typed, which is what makes the
+    skip decision free: no resolve, no network, before any Item work.
+    The record is not a download history -- it holds only what is done,
+    is rewritten in place, and carries no timestamps.
+    """
+
+    def __init__(self, path: Path, urls: tuple[str, ...] = ()) -> None:
+        self.path = path
+        self._urls = list(urls)
+
+    @classmethod
+    def load(cls, path: Path) -> tuple[SkipRecord, str | None]:
+        """Read the record at ``path``; return ``(record, warning)``.
+
+        A missing file is the ordinary first-run case: an empty record,
+        no warning. A corrupt or unreadable one is named in a warning
+        and skipped over, so a hand-mangled record cannot stop a run --
+        the built-in behaviour (fetch everything) is the safe fallback.
+        """
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return cls(path), None
+        except (OSError, ValueError) as exc:
+            return cls(path), f"Ignoring unreadable skip record {path}: {exc}"
+        urls: list[str] = []
+        for line in raw.splitlines():
+            url = line.strip()
+            if url and url not in urls:
+                urls.append(url)
+        return cls(path, tuple(urls)), None
+
+    def __contains__(self, url: str) -> bool:
+        return url in self._urls
+
+    def add(self, url: str) -> None:
+        """Note ``url`` as done, keeping first-seen order, no duplicates."""
+        if url not in self._urls:
+            self._urls.append(url)
+
+    def save(self) -> None:
+        """Rewrite the record in place.
+
+        Called after every Item that finished (or was skipped), so an
+        interrupt loses nothing that completed. Best-effort on errors:
+        the warning is printed and the run continues, because a record
+        that could not be written must not fail a download that did.
+        """
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                "".join(f"{url}\n" for url in self._urls), encoding="utf-8"
+            )
+        except OSError as exc:
+            print(
+                f"warning: could not write the skip record {self.path}: {exc}",
+                file=sys.stderr,
+            )
+
 
 def _is_waiting_capture(plan: Plan) -> bool:
     """True when ``plan`` is a Capture whose stream has not started.
@@ -79,11 +155,17 @@ class ItemResult:
     Item was in progress). That makes the exit-code mapping a single
     ``EXIT_CODE`` lookup on the most-specific exception, instead of a
     string-keyed table.
+
+    A skipped Item (ticket #14) carries no error either: it counts as
+    done, not failed. ``path`` says where the file already is when the
+    skip was decided by file presence, and stays ``None`` when the
+    skip came from the record (whose check runs before any resolve).
     """
 
     link: str
     path: Path | None
     error: BaseException | None
+    skipped: bool = False
 
 
 _OUTCOME_LABELS: dict[type[BaseException], str] = {
@@ -235,6 +317,7 @@ def run_item(
     executor: ExecutorCallable,
     wait_for_stream: bool = False,
     wait_interval: int = DEFAULT_WAIT_INTERVAL,
+    skip_existing: bool = True,
 ) -> ItemResult:
     """Run a single Item; return its outcome.
 
@@ -243,7 +326,7 @@ def run_item(
 
     A Capture announces how to stop it -- a single interrupt -- before
     recording begins, so the user never has to guess (ticket #10).
-    With ``--wait-for-stream``, a Capture for a stream that has not
+    With ``wait_for_stream``, a Capture for a stream that has not
     started yet is waited for: the Item polls until the stream goes
     live and only then records (ticket #11). An interrupt during the
     executor is not an error to recover from but an aftermath to finish
@@ -253,12 +336,27 @@ def run_item(
     ``KeyboardInterrupt``, which the Queue sees and stops on. An
     interrupt while *waiting* surfaces through ``run_queue``'s handler
     instead: nothing has been recorded, so there is no aftermath.
+
+    With ``skip_existing`` (ticket #14), an Item whose target file is
+    already on disk is skipped without running the executor: the Plan
+    (which needs one metadata request) says exactly where the file
+    would land, and it is already there. The check sits before the
+    stop-instruction and the wait-for-stream loop, so a Capture whose
+    file exists is skipped without waiting for a stream. The caller
+    records the skip, so later runs skip the resolve too.
     """
     try:
         plan = resolve_plan(link, profile, output_root, resolver, wait_for_stream)
     except (InvalidLinkError, UserError) as exc:
         print(str(exc), file=sys.stderr)
         return ItemResult(link=link, path=None, error=exc)
+
+    if skip_existing and plan.target_path.is_file():
+        print(
+            f"{link}: skipped (file already present: {plan.target_path})",
+            file=sys.stderr,
+        )
+        return ItemResult(link=link, path=plan.target_path, error=None, skipped=True)
 
     print(
         f"{link}: {plan.kind.name} with profile {plan.profile.name}",
@@ -319,7 +417,11 @@ class QueueOutcome:
 
     @property
     def successes(self) -> list[ItemResult]:
-        return [r for r in self.results if r.error is None]
+        return [r for r in self.results if r.error is None and not r.skipped]
+
+    @property
+    def skipped(self) -> list[ItemResult]:
+        return [r for r in self.results if r.skipped]
 
     @property
     def failures(self) -> list[ItemResult]:
@@ -328,12 +430,21 @@ class QueueOutcome:
     def summary(self) -> str:
         """Render the closing summary: what succeeded, failed, and why.
 
-        One line per Item, then the counts. When the run was
-        interrupted the remaining Items are named as not run.
+        One line per Item, then the counts. A skipped Item gets its own
+        line and its own count (ticket #14); the skipped segment is
+        omitted from the counts line when nothing was skipped, so the
+        "N ok, M failed." shape is unchanged for every other Job. When
+        the run was interrupted the remaining Items are named as not
+        run.
         """
         lines: list[str] = []
         for r in self.results:
-            if r.error is None:
+            if r.skipped:
+                if r.path is not None:
+                    lines.append(f"skipped: {r.link} (file already present: {r.path})")
+                else:
+                    lines.append(f"skipped: {r.link} (in the skip record)")
+            elif r.error is None:
                 assert r.path is not None
                 lines.append(f"ok: {r.link} ({r.path})")
             else:
@@ -341,8 +452,11 @@ class QueueOutcome:
         if self.interrupted:
             not_started = len(self.links) - len(self.results)
             lines.append(f"Interrupted: {not_started} Item(s) were not run.")
-        failures = self.failures
-        lines.append(f"{len(self.successes)} ok, {len(failures)} failed.")
+        counts = f"{len(self.successes)} ok"
+        if self.skipped:
+            counts += f", {len(self.skipped)} skipped"
+        counts += f", {len(self.failures)} failed."
+        lines.append(counts)
         return "\n".join(lines) + "\n"
 
     def exit_code(self) -> int:
@@ -373,6 +487,7 @@ def run_queue(
     executor: ExecutorCallable,
     wait_for_stream: bool = False,
     wait_interval: int = DEFAULT_WAIT_INTERVAL,
+    skip_existing: bool = True,
 ) -> QueueOutcome:
     """Handle every Item in ``links`` strictly sequentially.
 
@@ -384,33 +499,57 @@ def run_queue(
     A ``KeyboardInterrupt`` stops the Queue: the Item in flight is
     recorded as interrupted, the rest are marked not run, and the
     Items that already finished are untouched.
+
+    With ``skip_existing`` (the default, ticket #14), a link named in
+    the skip record beside the output is skipped before any resolve --
+    so re-running a completed Queue downloads nothing, not even a
+    metadata request. Every Item that finishes (or is skipped by file
+    presence inside ``run_item``) is added to the record, which is
+    rewritten after each one: an interrupt mid-Queue still keeps every
+    completed Item in the record. ``skip_existing=False`` runs every
+    link again; the record itself is still kept up to date.
     """
+    record, warning = SkipRecord.load(output_root / SKIP_RECORD_NAME)
+    if warning:
+        print(warning, file=sys.stderr)
+
     results: list[ItemResult] = []
     interrupted = False
     for index, link in enumerate(links):
-        try:
-            result = run_item(
-                link,
-                profile,
-                output_root,
-                resolver,
-                executor,
-                wait_for_stream=wait_for_stream,
-                wait_interval=wait_interval,
-            )
-        except KeyboardInterrupt:
-            # An interrupt during planning or reporting -- the Item in
-            # flight is recorded as interrupted; nothing after it
-            # starts. (An interrupt inside the executor is finished by
-            # run_item's aftermath and returns a result.)
-            interrupted = True
-            result = ItemResult(
-                link=link,
-                path=None,
-                error=KeyboardInterrupt(
-                    "interrupted before this Item finished",
-                ),
-            )
+        if skip_existing and link in record:
+            print(f"{link}: skipped (in the skip record)", file=sys.stderr)
+            result = ItemResult(link=link, path=None, error=None, skipped=True)
+        else:
+            try:
+                result = run_item(
+                    link,
+                    profile,
+                    output_root,
+                    resolver,
+                    executor,
+                    wait_for_stream=wait_for_stream,
+                    wait_interval=wait_interval,
+                    skip_existing=skip_existing,
+                )
+            except KeyboardInterrupt:
+                # An interrupt during planning or reporting -- the Item in
+                # flight is recorded as interrupted; nothing after it
+                # starts. (An interrupt inside the executor is finished by
+                # run_item's aftermath and returns a result.)
+                interrupted = True
+                result = ItemResult(
+                    link=link,
+                    path=None,
+                    error=KeyboardInterrupt(
+                        "interrupted before this Item finished",
+                    ),
+                )
+            if result.error is None:
+                # Finished, or skipped because the file is already
+                # there: either way the user has it. Noted at once, so
+                # an interrupt later in the Queue loses nothing.
+                record.add(link)
+                record.save()
         results.append(result)
         # run_item finished the interrupt's aftermath itself for an
         # interrupt inside the executor, and reports it as a result
@@ -429,8 +568,10 @@ def run_queue(
 
 __all__ = [
     "DEFAULT_WAIT_INTERVAL",
+    "SKIP_RECORD_NAME",
     "ItemResult",
     "QueueOutcome",
+    "SkipRecord",
     "label_for",
     "run_item",
     "run_queue",
