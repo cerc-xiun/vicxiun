@@ -80,6 +80,20 @@ is safe and downloads nothing twice. Two things count as "already have it":
 
 Pass `--no-skip` to handle every link again regardless.
 
+## Very large playlists
+
+A link that turns out to be a playlist — a whole channel, say — is not
+downloaded unnoticed. A playlist with more than 50 Items asks first, naming how
+many Items were found; declining exits having downloaded nothing. The limit is
+yours to set:
+
+```console
+vicxiun --playlist-limit 200 https://example.com/a-big-mix
+```
+
+`--playlist-limit 0` turns the confirmation off. At or below the limit a
+playlist simply proceeds.
+
 ## Tests
 
 ```console

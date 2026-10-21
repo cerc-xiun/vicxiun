@@ -107,3 +107,36 @@ settings file location inside Termux's private home is standard but
   otherwise, so older assertions still hold.
 - For #15 (large-playlist warn): decide whether skipped/recorded Items
   count toward the 50-Item threshold — they were asked for either way.
+  **Resolved by #15**: the threshold counts what the playlist itself
+  reports (every Item the link stands for); a record-skip happens
+  before any resolve, so a recorded playlist never asks.
+
+## From #15 (Warn before a very large playlist)
+
+- A playlist is one link whose resolve reports `_type: "playlist"` and
+  `playlist_count`. The engine resolver now sets
+  `extract_flat: "in_playlist"`, so a huge channel resolves fast
+  (count only, no per-entry fetch); direct video links are unaffected.
+- The confirmation is asked in `run_item` after the resolve, before
+  anything of the playlist is fetched: the Queue prints the count
+  statement (stderr) and calls the injected `confirm` callback. The
+  CLI seam is `cli.set_confirm` (fakes: `install_confirm`); the
+  built-in prompt reads stdin, and only `y`/`yes` confirms — empty,
+  other answers and EOF (piped scripts) all decline.
+- `--playlist-limit N` (default 50): above N Items asks; `0` turns it
+  off; negative is a `parser.error` (exit 2). Not persistable in
+  settings — same reasoning as `--wait-interval` in the #16 note.
+- Declining is not a failure: nothing downloads, the declined link is
+  NOT written to the skip record (it is not done — the next run asks
+  again), the Queue stops, Items after it are named as not run
+  ("Declined: N Item(s) were not run."), and the exit is 0 when
+  nothing else failed.
+- **Known un-ticketed limit**: the executor still passes the Plan's
+  single target path as yt-dlp's `outtmpl`, so a playlist download
+  writes every entry to the SAME file — each entry overwrites the
+  previous one and only the last entry survives. The confirmation
+  guards the disk; per-entry naming (and re-thinking the path-cleaning
+  guarantees for yt-dlp-chosen names) needs its own ticket if
+  playlists become a real use case. Do not "fix" this by switching to
+  yt-dlp's own output templates: that bypasses vicxiun's hostile-title
+  sanitisation (security surface, spec rule 43).

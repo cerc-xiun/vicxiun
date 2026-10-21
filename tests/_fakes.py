@@ -44,6 +44,17 @@ BASIC_LIVE: dict[str, object] = {
     "video_id": "live999",
 }
 
+# A representative playlist metadata dict (ticket #15): what the flat
+# resolve of a many-video link returns. No per-video fields -- the
+# count is what the large-playlist confirmation works from.
+BASIC_PLAYLIST: dict[str, object] = {
+    "_type": "playlist",
+    "title": "A Big Mix",
+    "uploader": "Some Channel",
+    "id": "pl123",
+    "playlist_count": 60,
+}
+
 # The executor's callable type. Module-level so both test files agree.
 ExecutorFn = Callable[[Plan, Callable[[dict[str, object]], None] | None], Path]
 
@@ -71,6 +82,15 @@ def install_resolver(
 def install_executor(monkeypatch, fn: ExecutorFn) -> None:
     """Install a fake executor at the CLI seam."""
     monkeypatch.setattr(cli_mod, "_executor", fn)
+
+
+def install_confirm(monkeypatch, fn: Callable[[int], bool]) -> None:
+    """Install a fake large-playlist confirmation at the CLI seam.
+
+    ``fn`` receives the count of Items found and answers whether the
+    run may start (ticket #15).
+    """
+    monkeypatch.setattr(cli_mod, "_confirm", fn)
 
 
 def _install_passing_prereq(monkeypatch) -> None:

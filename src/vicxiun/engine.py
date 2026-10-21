@@ -138,6 +138,12 @@ class YtDlpEngine:
         options = _safe_default_options()
         options["quiet"] = True
         options["no_warnings"] = True
+        # Inside a playlist, resolve the entries flat: the metadata
+        # request must report how many Items the playlist holds (ticket
+        # #15) without fetching every entry's metadata first -- a
+        # five-thousand-video channel would otherwise resolve for
+        # hours. A direct video link is unaffected.
+        options["extract_flat"] = "in_playlist"
         with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False, process=True)
         # ``extract_info`` returns the processed info dict; we surface it
