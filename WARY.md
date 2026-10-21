@@ -214,3 +214,21 @@ settings file location inside Termux's private home is standard but
   the Queue paths, not yt-dlp's real hook cadence.
 - README gained "Running out of disk space"; GLOSSARY gained
   Pre-flight floor and Running floor.
+
+## From #17 (Security audit)
+
+- The spec's rule table never numbered rules 4 and 8 anywhere; the audit named
+  them: rule 4 = credentials never requested or stored (story 44), rule 8 =
+  hostile-title containment (story 43). The enumeration lives in
+  `docs/security-audit.md`; run it with `uv run pytest tests/test_security.py`.
+- `test_rule_10` reads `docs/security-audit.md` and fails if the doc drifts
+  from the ten rule tests: renaming a rule test means editing the doc's table
+  in the same commit.
+- Whole-package source scans guard rules 2 and 4 and the shell regression:
+  a new module that mentions `winreg`/`cookiesfrombrowser`/`shell=True`
+  even in a comment will trip `test_rule_2`/`test_rule_4`/the surface test.
+  engine.py's existing "cookie is required" comment deliberately avoids the
+  scanned strings.
+- `test_rule_3` monkeypatches `subprocess.run`/`subprocess.Popen` to
+  explode and `shutil.which` to `None`; monkeypatch undoes it, no ordering
+  coupling with other tests.

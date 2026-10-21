@@ -118,6 +118,11 @@ command line — arguments in, output and exit codes out — and no test reaches
 the network. CI runs the same command on Windows and Linux, on every push and
 every pull request.
 
+The security rules are audited by one test per rule, ten in total, in
+`tests/test_security.py` — the enumeration and every covering test are listed
+in [docs/security-audit.md](docs/security-audit.md), and the audit runs on its
+own with `uv run pytest tests/test_security.py`.
+
 ## Installing it
 
 The package is not on PyPI yet (that is tracked in the issue tracker), so
