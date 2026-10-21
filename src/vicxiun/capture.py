@@ -18,9 +18,19 @@ module is where it is decided:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from vicxiun.plan import CaptureKind, Plan
+
+# yt-dlp's partial-download suffixes. Only names ending in one of
+# these are removable artifacts: the broad-suffix scan below finds
+# candidates cheaply, but deletion is gated on this so a sibling the
+# prefix accidentally matches (a thumbnail, a user's own
+# ``<target>.old-backup``) is never taken for a partial.
+_ARTIFACT_RE = re.compile(
+    r"\.(?:part(?:-Frag\d+)?|ytdl|f\d+\.[^\s.]+(?:\.part(?:-Frag\d+)?)?)$"
+)
 
 # The instruction is printed before recording begins (user story 13),
 # and it says why one interrupt is the whole story: a second interrupt
@@ -34,32 +44,53 @@ STOP_INSTRUCTION = (
 def partial_artifacts(target: Path) -> list[Path]:
     """Return yt-dlp's partial-download artifacts beside ``target``.
 
-    An artifact is any sibling whose name continues ``target``'s with a
-    dot: ``.part``, ``.part-FragNN``, ``.ytdl``, and the pre-merge
-    ``.fNNN.<ext>`` files. The final file itself is never an artifact:
-    its own name does not start with ``<target>.``.
+    An artifact is a sibling whose name continues ``target``'s with a
+    dot and then one of yt-dlp's partial markers: ``.part``,
+    ``.part-FragNN``, ``.ytdl``, or a pre-merge ``.fNNN.<ext>`` file.
+    Anything else that merely starts with the target's name (a
+    thumbnail, the user's own backup) is not ours to touch.
     """
     parent = target.parent
     if not parent.is_dir():
         return []
     prefix = target.name + "."
-    return sorted(p for p in parent.iterdir() if p.name.startswith(prefix))
+    return sorted(
+        p
+        for p in parent.iterdir()
+        if p.name.startswith(prefix) and _ARTIFACT_RE.search(p.name)
+    )
+
+
+# For reporting a stopped Capture: rank what survived. A ``.part``
+# file is the recording proper; a raw ``.fNNN.<ext>`` fragment is one
+# video-only stream no player will frame alone, so it is reported
+# last (it is deleted either way).
+_KEEP_RANK = (".part", ".part-Frag", ".ytdl")
+
+
+def _rank_artifact(path: Path) -> tuple[int, str]:
+    name = path.name
+    for rank, marker in enumerate(_KEEP_RANK):
+        if marker in name:
+            return rank, name
+    return len(_KEEP_RANK), name
 
 
 def collect_captured(target: Path) -> Path | None:
     """The file a stopped Capture left behind, if anything survived.
 
     A clean stop leaves the final file where the Plan said it would
-    be. Without a clean shutdown the partial recording (``.part``) is
-    the best that survived -- still playable, because the container is
-    the whole safety net (ADR-0007). ``None`` means nothing had been
-    recorded yet.
+    be. Without a clean shutdown whatever ``.part`` recording survived
+    is reported -- still playable, because the container is the whole
+    safety net (ADR-0007). ``None`` means nothing had been recorded
+    yet.
     """
     if target.is_file():
         return target
-    for artifact in partial_artifacts(target):
-        return artifact
-    return None
+    artifacts = partial_artifacts(target)
+    if not artifacts:
+        return None
+    return min(artifacts, key=_rank_artifact)
 
 
 def remove_partial_download(target: Path, preexisting: bool) -> None:
@@ -73,13 +104,21 @@ def remove_partial_download(target: Path, preexisting: bool) -> None:
     write timestamp can trail the wall clock by microseconds, which
     makes "written during this Item" undecidable from two adjacent
     writes. A final file that existed before is left alone -- a
-    completed Item's file is guaranteed intact (ticket #13) -- the one
-    known limit: a interrupted merge of a link the user already has
-    can break the previous copy, because ffmpeg truncates it before
-    the interrupt could say anything. The Item is simply run again.
+    completed Item's file is guaranteed intact (ticket #13) -- and the
+    one known limit is the copy a re-run of the SAME link already had
+    completed before this Job began, where an interrupted merge lands
+    after ffmpeg has truncated the old copy: the wreckage is left in
+    place, and re-running finishes the job. Deletion is per-file
+    best-effort: on Windows yt-dlp can still hold an open handle when
+    the interrupt arrives, and one busy file must not stop the rest.
     """
     for artifact in partial_artifacts(target):
-        artifact.unlink(missing_ok=True)
+        try:
+            artifact.unlink(missing_ok=True)
+        except OSError:
+            # Still held by a dying yt-dlp (Windows). Next run cleans
+            # it: nothing here is worth recovering.
+            pass
     if target.is_file() and not preexisting:
         target.unlink()
 

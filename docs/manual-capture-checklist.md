@@ -14,16 +14,17 @@ and the site.
 
 ## The stop that is your choice
 
-1. `vicxiun --wait-for-stream https://www.youtube.com/watch?v=<LIVE_ID>`
+1. `vicxiun https://www.youtube.com/watch?v=<LIVE_ID>`
    on a stream that is already live.
 2. Confirm, before recording visibly starts, that stderr says:
    `stop: press Ctrl+C once to end the Capture`. The line must appear
    before any progress lines.
 3. Record for at least a minute, then press **Ctrl+C exactly once**.
 4. Expected: the tool prints one result line and exits 130, with the
-   kept path named in the message; the Queue does not ask for a second
-   interrupt; the `.part`-file, if any, is still present and named in
-   the result line or beside the final file.
+   kept path named in the message. Open the exact path printed
+   (not a `.fNNN`-numbered fragment beside it -- if that is what got
+   printed, that is a bug to record). It must play, including the
+   earliest second the tool captured (`live_from_start`).
 5. Open the file it pointed to: it plays, including the earliest
    second the tool captured (`live_from_start`).
 

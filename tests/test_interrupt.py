@@ -231,6 +231,40 @@ def test_a_download_interrupt_leaves_no_unopenable_final_file(
     assert held == []
 
 
+def test_a_download_interrupt_does_not_touch_files_that_merely_look_like_partials(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The cleanup deletes only genuine yt-dlp partials. A file the
+    user put beside the target -- a backup, a thumbnail -- shares the
+    prefix but is not a partial, and must survive the interrupt
+    untouched (ticket #13's spirit: nothing but partials is ours).
+    """
+    install_resolver(
+        monkeypatch,
+        {"https://example.com/fin": {**BASIC_DOWNLOAD, "video_id": "dl110"}},
+    )
+    uploader = tmp_path / "Some Channel"
+    uploader.mkdir(parents=True, exist_ok=True)
+    survivors = [
+        uploader / "Best of 2024 [dl110].mp4.old-backup",
+        uploader / "Best of 2024 [dl110].mp4.jpg",
+        uploader / "Best of 2024 [dl110].mp4",
+    ]
+    for survivor in survivors:
+        survivor.write_bytes(b"user data")
+
+    def executor(plan, progress):
+        raise KeyboardInterrupt("simulated Ctrl-C")
+
+    install_executor(monkeypatch, executor)
+
+    code = main(["--folder", str(tmp_path), "https://example.com/fin"])
+
+    assert code == 130
+    for survivor in survivors:
+        assert survivor.read_bytes() == b"user data"
+
+
 def test_a_download_interrupt_spares_an_older_file(tmp_path: Path, monkeypatch) -> None:
     """A final file written BEFORE this Item began -- a completed Item
     or a previous run's result -- survives the interruption (an Item
