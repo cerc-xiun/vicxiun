@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from vicxiun.capture import STOP_INSTRUCTION, after_interrupt
 from vicxiun.engine import default_progress_printer
 from vicxiun.errors import (
     EXIT_CODE,
@@ -37,7 +38,13 @@ from vicxiun.errors import (
     UnexpectedFailure,
     UserError,
 )
-from vicxiun.plan import InvalidLinkError, Plan, Profile, resolve_plan
+from vicxiun.plan import (
+    CaptureKind,
+    InvalidLinkError,
+    Plan,
+    Profile,
+    resolve_plan,
+)
 
 ResolverCallable = Callable[[str], dict[str, object]]
 ExecutorCallable = Callable[[Plan, Callable[[dict[str, object]], None] | None], Path]
@@ -147,9 +154,14 @@ def run_item(
     Plan lines and the per-Item one-line result are printed on stderr.
     The caller aggregates ``ItemResult`` values into a summary.
 
-    ``KeyboardInterrupt`` is ``BaseException``, not ``Exception``, so
-    the broad ``except Exception`` below does not swallow it -- the
-    interrupt escapes to the Queue, which stops cleanly.
+    A Capture announces how to stop it -- a single interrupt -- before
+    recording begins, so the user never has to guess (ticket #10).
+    An interrupt during the executor is not an error to recover from
+    but an aftermath to finish (``vicxiun.capture.after_interrupt``):
+    a Capture keeps its recording, a Download is cleaned of partial
+    files (ticket #10). In both cases the outcome is an ``ItemResult``
+    whose error is ``KeyboardInterrupt``, which the Queue sees and
+    stops on.
     """
     try:
         plan = resolve_plan(link, profile, output_root, resolver, wait_for_stream)
@@ -164,8 +176,19 @@ def run_item(
     print(f"  target: {plan.target_path}", file=sys.stderr)
 
     progress = default_progress_printer()
+    # Snapshot before the executor runs: on a Download interrupt the
+    # cleanup deletes only a file the Item itself created; anything on
+    # disk beforehand is a completed record and stays (ticket #13).
+    preexisting = plan.target_path.is_file()
+    if isinstance(plan.kind, CaptureKind):
+        print(STOP_INSTRUCTION, file=sys.stderr)
     try:
         actual = executor(plan, progress)
+    except KeyboardInterrupt:
+        detail, kept = after_interrupt(plan, preexisting)
+        result = ItemResult(link=link, path=kept, error=KeyboardInterrupt(detail))
+        _record_failure(result)
+        return result
     except Exception as exc:  # noqa: BLE001 - boundary, mapped to 5
         named = _classify_failure(exc)
         result = ItemResult(link=link, path=None, error=named)
@@ -265,30 +288,35 @@ def run_queue(
     interrupted = False
     for index, link in enumerate(links):
         try:
-            results.append(
-                run_item(
-                    link,
-                    profile,
-                    output_root,
-                    resolver,
-                    executor,
-                    wait_for_stream=wait_for_stream,
-                )
+            result = run_item(
+                link,
+                profile,
+                output_root,
+                resolver,
+                executor,
+                wait_for_stream=wait_for_stream,
             )
         except KeyboardInterrupt:
-            # Stop at once. The Item in flight is recorded as
-            # interrupted; nothing after it starts. Items that already
-            # finished keep their completed files and stay reported.
+            # An interrupt during planning or reporting -- the Item in
+            # flight is recorded as interrupted; nothing after it
+            # starts. (An interrupt inside the executor is finished by
+            # run_item's aftermath and returns a result.)
             interrupted = True
-            results.append(
-                ItemResult(
-                    link=link,
-                    path=None,
-                    error=KeyboardInterrupt(
-                        "interrupted before this Item finished",
-                    ),
-                )
+            result = ItemResult(
+                link=link,
+                path=None,
+                error=KeyboardInterrupt(
+                    "interrupted before this Item finished",
+                ),
             )
+        results.append(result)
+        # run_item finished the interrupt's aftermath itself for an
+        # interrupt inside the executor, and reports it as a result
+        # whose error is KeyboardInterrupt; an interrupt during
+        # planning surfaces through the except above. Either way:
+        if isinstance(result.error, KeyboardInterrupt):
+            # the run is interrupted -- the Items after it do not start.
+            interrupted = True
             break
     return QueueOutcome(
         links=tuple(links),
