@@ -50,6 +50,7 @@ class _FakeMetadata:
     is_live: bool
     format_description: str
     video_id: str
+    live_status: str = ""
     height: int | None = None
     vcodec: str | None = None
     acodec: str | None = None
@@ -60,6 +61,7 @@ class _FakeMetadata:
             "uploader": self.uploader,
             "ext": self.ext,
             "is_live": self.is_live,
+            "live_status": self.live_status,
             "format_description": self.format_description,
             "video_id": self.video_id,
             "height": self.height,
@@ -401,6 +403,67 @@ def test_plan_does_not_wait_on_finished_video(tmp_path: Path) -> None:
         resolver,
         wait_for_stream=True,
     )
+    assert plan.wait_for_stream is False
+
+
+# A scheduled stream: the platform says a live stream is coming
+# (yt-dlp's ``live_status="is_upcoming"``) but it has not started yet.
+
+
+def test_plan_waits_on_a_scheduled_stream_when_asked(tmp_path: Path) -> None:
+    """AC (ticket #11): --wait-for-stream on a not-yet-live stream waits.
+
+    The Item stays a Capture even though the stream is not live yet,
+    so the Queue waits for it and records it when it starts.
+    """
+    url = "https://example.com/scheduled"
+    resolver = _FakeResolver(
+        {
+            url: _FakeMetadata(
+                title="Tonight's Stream",
+                uploader="Chan",
+                ext="mkv",
+                is_live=False,
+                live_status="is_upcoming",
+                format_description="MKV",
+                video_id="id3",
+            )
+        }
+    )
+    plan = resolve_plan(
+        url,
+        PhoneSafeProfile(),
+        tmp_path,
+        resolver,
+        wait_for_stream=True,
+    )
+    assert isinstance(plan.kind, CaptureKind)
+    assert plan.kind.is_live is False
+    assert plan.wait_for_stream is True
+
+
+def test_plan_ignores_a_scheduled_stream_without_the_flag(tmp_path: Path) -> None:
+    """Without --wait-for-stream nothing changed (ticket #11).
+
+    A scheduled link resolves exactly as before ticket #11: a
+    Download, no waiting.
+    """
+    url = "https://example.com/scheduled"
+    resolver = _FakeResolver(
+        {
+            url: _FakeMetadata(
+                title="Tonight's Stream",
+                uploader="Chan",
+                ext="mkv",
+                is_live=False,
+                live_status="is_upcoming",
+                format_description="MKV",
+                video_id="id3",
+            )
+        }
+    )
+    plan = resolve_plan(url, PhoneSafeProfile(), tmp_path, resolver)
+    assert isinstance(plan.kind, DownloadKind)
     assert plan.wait_for_stream is False
 
 

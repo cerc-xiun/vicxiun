@@ -7,7 +7,8 @@ real run then executes it; the preview prints it and stops.
 The plan is *not* a parallel implementation -- it sits exactly on the
 execution path. The engine adapter is injected so tests never reach the
 network. Two child kinds -- ``Download`` and ``Capture`` -- are decided by
-inspecting the link (``is_live``).
+inspecting the link (``is_live``, and ``live_status`` for a stream that
+has not started yet).
 """
 
 from __future__ import annotations
@@ -28,6 +29,12 @@ from vicxiun.paths import resolve_target
 # shell wrappers, anything starting with ``-`` (which would be misread by the
 # shell as a flag, and is rejected with the user-error code), and empty.
 _HTTP_SCHEMES = re.compile(r"^https?://", re.IGNORECASE)
+
+# yt-dlp's live-status value for a stream that has not started yet
+# (the full vocabulary is ``is_live``, ``is_upcoming``, ``post_live``,
+# ``not_live``). Sites that report nothing (or something else) are
+# never treated as scheduled.
+_UPCOMING = "is_upcoming"
 
 
 class InvalidLinkError(UserError):
@@ -204,7 +211,14 @@ ItemKind = DownloadKind | CaptureKind
 
 @dataclass(frozen=True)
 class Metadata:
-    """The metadata the engine yields from a non-downloading extract."""
+    """The metadata the engine yields from a non-downloading extract.
+
+    ``live_status`` is yt-dlp's own vocabulary (``is_live``, ``is_upcoming``,
+    ``post_live``, ``not_live``); empty when the site does not report it.
+    A *scheduled* stream reports ``is_live=False`` with
+    ``live_status="is_upcoming"`` -- that combination is what lets
+    ``--wait-for-stream`` recognise a stream that has not started yet.
+    """
 
     title: str
     uploader: str
@@ -212,6 +226,7 @@ class Metadata:
     is_live: bool
     format_description: str
     video_id: str
+    live_status: str = ""
 
 
 class MetadataResolver(Protocol):
@@ -246,6 +261,9 @@ def _to_metadata(raw: object) -> Metadata:
         is_live=bool(raw["is_live"]),
         format_description=str(raw["format_description"]),
         video_id=str(raw["video_id"]),
+        # Optional: sites that do not report a live status (and test
+        # fakes written before ticket #11) simply leave it empty.
+        live_status=str(raw.get("live_status") or ""),
     )
 
 
@@ -315,7 +333,17 @@ def resolve_plan(
     raw = resolver(safe_url)
     metadata = _to_metadata(raw)
 
-    kind: ItemKind = CaptureKind() if metadata.is_live else DownloadKind()
+    if metadata.is_live:
+        kind: ItemKind = CaptureKind()
+    elif wait_for_stream and metadata.live_status == _UPCOMING:
+        # A scheduled stream: not live yet, but the platform says it
+        # will be. It is still a Capture -- the Queue waits for it to
+        # go live and then records from the beginning (ticket #11).
+        # Without --wait-for-stream nothing changes: it stays a
+        # Download, exactly as before this ticket.
+        kind = CaptureKind(is_live=False)
+    else:
+        kind = DownloadKind()
 
     # Capture container is always MKV; Download container comes from the
     # profile (PhoneSafe -> MP4). We override the file extension to match.

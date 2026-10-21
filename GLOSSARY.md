@@ -30,6 +30,8 @@ _Avoid_: recording, stream download, rip
 
 **Queue**:
 The strictly sequential handling of a Job's Items, one at a time and in order.
+A waiting Capture blocks it; running one in a separate terminal is the
+documented workaround.
 _Avoid_: playlist, pool, batch, parallel processing
 
 ### What you ask for

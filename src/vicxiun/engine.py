@@ -216,8 +216,10 @@ def _build_executor_options(
     criterion of #9) and ``hls_use_mpegts`` (each HLS segment is wrapped
     in MPEG-TS so the MKV container can keep appending fragments and a
     clean stop, deliberate or accidental, leaves a playable file per
-    ADR-0007). ``wait_for_stream`` is owned by ticket #11 and lands
-    when its polling logic does.
+    ADR-0007). Waiting for a stream that has not started yet is the
+    Queue's job (ticket #11): by the time a Capture Plan reaches the
+    engine the stream is live, and ``live_from_start`` records it from
+    the beginning.
     """
     options = _safe_default_options()
     options["quiet"] = True

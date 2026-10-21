@@ -25,7 +25,12 @@ from vicxiun.plan import (
     resolve_plan,
 )
 from vicxiun.prereqs import run as run_prereq_check
-from vicxiun.queue import ExecutorCallable, ResolverCallable, run_queue
+from vicxiun.queue import (
+    DEFAULT_WAIT_INTERVAL,
+    ExecutorCallable,
+    ResolverCallable,
+    run_queue,
+)
 from vicxiun.settings import KNOWN_KEYS
 from vicxiun.settings import load as load_settings
 from vicxiun.settings import save as save_settings
@@ -119,8 +124,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "For a live stream, wait until the stream starts and then "
-            "record. With --dry-run this is reported in the Plan but "
-            "does not block."
+            "record. A waiting Item blocks the rest of the Queue. With "
+            "--dry-run this is reported in the Plan but does not block."
+        ),
+    )
+    parser.add_argument(
+        "--wait-interval",
+        type=int,
+        default=DEFAULT_WAIT_INTERVAL,
+        metavar="SECONDS",
+        help=(
+            "With --wait-for-stream, how often to check whether the "
+            "stream has started, in seconds. Defaults to 60."
         ),
     )
     parser.add_argument(
@@ -209,6 +224,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not args.links:
         parser.error("at least one LINK is required")
+
+    if args.wait_interval < 1:
+        parser.error("--wait-interval must be a whole number of seconds, at least 1")
 
     try:
         profile = profile_from_name(
@@ -307,6 +325,7 @@ def _run_real(
         resolver=_resolve_metadata,
         executor=_execute_plan,
         wait_for_stream=args.wait_for_stream,
+        wait_interval=args.wait_interval,
     )
     print(outcome.summary(), end="", file=sys.stderr)
     return outcome.exit_code()

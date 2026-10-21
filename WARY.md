@@ -34,7 +34,33 @@ settings file location inside Termux's private home is standard but
 **untested on a real device** — same applies to captures landing on
 `/sdcard/Movies/vicxiun`.
 
-## From #10 (this ticket)
+## From #11 (Wait for a scheduled stream)
+
+- A *scheduled* stream reports `is_live=False` with
+  `live_status="is_upcoming"`; that combination is what makes
+  `--wait-for-stream` resolve it as `Capture(is_live=False)` instead of
+  a Download. Without the flag nothing changed (still a Download).
+- The poll loop lives in `vicxiun.queue._wait_for_stream_start` and the
+  Queue owns the wait: a waiting Item blocks the rest of the Queue by
+  sequence, not by any lock. Tests fake sleep at
+  `monkeypatch.setattr("vicxiun.queue.time.sleep", ...)` — never
+  real-wait in tests.
+- Deliberate rule: while waiting, a check that *fails* (network hiccup)
+  keeps waiting, but the first re-resolve that is no longer an
+  upcoming Capture ends the wait — a live Capture is recorded from the
+  beginning, and a Download (stream ended before any check saw it
+  live) fetches the platform's archive rather than waiting forever.
+- Scheduled-stream recognition assumes yt-dlp's `live_status`
+  vocabulary. Other extractors that do not report `live_status` will
+  not resolve as a waiting Capture — if a platform needs support, the
+  check is in `resolve_plan` (one `elif`). Verified by hand only via
+  the new checklist section ("The stream that has not started yet")
+  on a real scheduled stream.
+- `--wait-interval` (default 60, rejected if < 1 via parser.error →
+  exit 2) is **not persistable**, same reasoning as `--wait-for-stream`
+  in the #16 note.
+
+## From #10
 
 - `docs/manual-capture-checklist.md` needs to be run by hand on a real
   live stream (and ideally on an Android device). The automated tests

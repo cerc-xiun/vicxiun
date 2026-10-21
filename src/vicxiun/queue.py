@@ -24,6 +24,7 @@ real engine in; tests substitute fakes.
 from __future__ import annotations
 
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,19 @@ from vicxiun.plan import (
 
 ResolverCallable = Callable[[str], dict[str, object]]
 ExecutorCallable = Callable[[Plan, Callable[[dict[str, object]], None] | None], Path]
+
+# How often a waiting Capture re-checks whether the stream has started
+# (ticket #11). Seconds; overridable with ``--wait-interval``.
+DEFAULT_WAIT_INTERVAL = 60
+
+
+def _is_waiting_capture(plan: Plan) -> bool:
+    """True when ``plan`` is a Capture whose stream has not started.
+
+    A scheduled stream resolves as ``CaptureKind`` with ``is_live``
+    False (ticket #11); this is the one place that shape is decided.
+    """
+    return isinstance(plan.kind, CaptureKind) and not plan.kind.is_live
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +151,78 @@ def _record_failure(result: ItemResult) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Waiting for a scheduled stream (ticket #11)
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_stream_start(
+    plan: Plan,
+    profile: Profile,
+    output_root: Path,
+    resolver: ResolverCallable,
+    interval: int,
+) -> Plan:
+    """Block until the planned stream has started; return the Plan to run.
+
+    The Queue is strictly sequential, so a waiting Item blocks the rest
+    of the Queue; the caller has already announced that. Every
+    ``interval`` seconds the link is re-resolved: while it still comes
+    back as a scheduled Capture the wait continues (one visible line
+    per check), and a check that *fails* is also printed and retried --
+    the user has walked away, so one network hiccup must not lose the
+    recording. The wait ends as soon as the link resolves to anything
+    else: a live Capture (the normal case -- the engine records it from
+    the beginning via ``live_from_start``), or a Download, which means
+    the stream ended and finished before a check could see it live, in
+    which case the platform's archive is the recording to fetch.
+    """
+    print(
+        f"  waiting: the stream has not started; checking every {interval}s "
+        "(Ctrl+C stops waiting; this blocks the rest of the Queue)",
+        file=sys.stderr,
+        flush=True,
+    )
+    while _is_waiting_capture(plan):
+        time.sleep(interval)
+        try:
+            fresh = resolve_plan(
+                plan.url,
+                profile,
+                output_root,
+                resolver,
+                wait_for_stream=True,
+            )
+        except (InvalidLinkError, UserError) as exc:
+            print(
+                f"  still waiting (the last check failed: {exc})",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        plan = fresh
+        if _is_waiting_capture(plan):
+            print(
+                "  still waiting (the stream has not started)",
+                file=sys.stderr,
+                flush=True,
+            )
+    if isinstance(plan.kind, CaptureKind):
+        print(
+            "The stream has started; recording from the beginning.",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        print(
+            "The stream ended before recording could begin; "
+            "fetching the platform's archive instead.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return plan
+
+
+# ---------------------------------------------------------------------------
 # One Item
 # ---------------------------------------------------------------------------
 
@@ -148,6 +234,7 @@ def run_item(
     resolver: ResolverCallable,
     executor: ExecutorCallable,
     wait_for_stream: bool = False,
+    wait_interval: int = DEFAULT_WAIT_INTERVAL,
 ) -> ItemResult:
     """Run a single Item; return its outcome.
 
@@ -156,12 +243,16 @@ def run_item(
 
     A Capture announces how to stop it -- a single interrupt -- before
     recording begins, so the user never has to guess (ticket #10).
-    An interrupt during the executor is not an error to recover from
-    but an aftermath to finish (``vicxiun.capture.after_interrupt``):
-    a Capture keeps its recording, a Download is cleaned of partial
-    files (ticket #10). In both cases the outcome is an ``ItemResult``
-    whose error is ``KeyboardInterrupt``, which the Queue sees and
-    stops on.
+    With ``--wait-for-stream``, a Capture for a stream that has not
+    started yet is waited for: the Item polls until the stream goes
+    live and only then records (ticket #11). An interrupt during the
+    executor is not an error to recover from but an aftermath to finish
+    (``vicxiun.capture.after_interrupt``): a Capture keeps its
+    recording, a Download is cleaned of partial files (ticket #10). In
+    both cases the outcome is an ``ItemResult`` whose error is
+    ``KeyboardInterrupt``, which the Queue sees and stops on. An
+    interrupt while *waiting* surfaces through ``run_queue``'s handler
+    instead: nothing has been recorded, so there is no aftermath.
     """
     try:
         plan = resolve_plan(link, profile, output_root, resolver, wait_for_stream)
@@ -176,12 +267,18 @@ def run_item(
     print(f"  target: {plan.target_path}", file=sys.stderr)
 
     progress = default_progress_printer()
-    # Snapshot before the executor runs: on a Download interrupt the
-    # cleanup deletes only a file the Item itself created; anything on
-    # disk beforehand is a completed record and stays (ticket #13).
-    preexisting = plan.target_path.is_file()
     if isinstance(plan.kind, CaptureKind):
         print(STOP_INSTRUCTION, file=sys.stderr)
+    if plan.wait_for_stream and _is_waiting_capture(plan):
+        plan = _wait_for_stream_start(
+            plan, profile, output_root, resolver, wait_interval
+        )
+    # Snapshot after any wait, just before the executor runs: on a
+    # Download interrupt the cleanup deletes only a file the Item
+    # itself created; anything on disk beforehand is a completed record
+    # and stays (ticket #13). The wait can replace the Plan (and so the
+    # target path) with a fresh one, so the snapshot follows it.
+    preexisting = plan.target_path.is_file()
     try:
         actual = executor(plan, progress)
     except KeyboardInterrupt:
@@ -275,11 +372,15 @@ def run_queue(
     resolver: ResolverCallable,
     executor: ExecutorCallable,
     wait_for_stream: bool = False,
+    wait_interval: int = DEFAULT_WAIT_INTERVAL,
 ) -> QueueOutcome:
     """Handle every Item in ``links`` strictly sequentially.
 
     Items run one at a time, in the order the user typed them. A
     failed Item is recorded and the Queue continues to the next one.
+    With ``wait_for_stream`` a scheduled stream is waited out at
+    ``wait_interval`` seconds per check (ticket #11), which blocks the
+    Items after it -- documented, with the separate-terminal workaround.
     A ``KeyboardInterrupt`` stops the Queue: the Item in flight is
     recorded as interrupted, the rest are marked not run, and the
     Items that already finished are untouched.
@@ -295,6 +396,7 @@ def run_queue(
                 resolver,
                 executor,
                 wait_for_stream=wait_for_stream,
+                wait_interval=wait_interval,
             )
         except KeyboardInterrupt:
             # An interrupt during planning or reporting -- the Item in
@@ -326,6 +428,7 @@ def run_queue(
 
 
 __all__ = [
+    "DEFAULT_WAIT_INTERVAL",
     "ItemResult",
     "QueueOutcome",
     "label_for",

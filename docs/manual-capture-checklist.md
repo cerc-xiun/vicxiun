@@ -57,6 +57,22 @@ and the site.
 12. Expected: the first video's file opens, the Capture is kept, the
     third link is reported as not run, exit 130.
 
+## The stream that has not started yet
+
+13. Find an upcoming (scheduled) live stream. A few minutes before it
+    is due, run
+    `vicxiun --wait-for-stream --wait-interval 15 <link>` so each
+    check is visible.
+14. Expected while it waits: stderr says the stream has not started
+    and that it is checking every 15 seconds, with a line per check.
+    It must be clear the tool is working rather than stuck.
+15. When the stream goes live (or run it in a separate terminal to see
+    that the rest of your work is blocked until then -- that is the
+    documented behaviour), recording must begin at the very first
+    second the platform offers (`live_from_start`) with the stop
+    instruction shown before it. Stop and verify the file as in
+    steps 3-5.
+
 ## Android/Termux notes
 
 - The Settings file lives in Termux's private home; check that this

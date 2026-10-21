@@ -14,8 +14,10 @@ of the design, not a limitation.
 ## Status
 
 The package installs, the `vicxiun` command exists, and `--dry-run` resolves
-links into a printable Plan without downloading anything. The download and
-capture paths are next.
+links into a printable Plan without downloading anything. Downloads, live
+captures, waiting for a scheduled stream, the sequential Queue and remembered
+settings work; what is left of Milestone 1 is tracked in the
+[issue tracker](https://github.com/cerc-xiun/vicxiun/issues).
 
 ## Requirements
 
@@ -43,6 +45,18 @@ nothing changed.
 because `uv` puts the environment's scripts on `PATH` for `uv run`. `--dry-run`
 runs the metadata request the real run would run, prints a Plan and stops;
 it creates no files anywhere.
+
+## Waiting for a scheduled stream
+
+Pass `--wait-for-stream` and start the tool before a stream begins: it checks
+the link every `--wait-interval SECONDS` (the default is 60), says plainly that
+it is waiting, and starts recording from the beginning the moment the stream
+goes live. With `--dry-run` it reports that it would wait and returns
+immediately.
+
+A waiting Item **blocks the Queue**: the Queue handles one Item at a time, so
+the links after it will not start until the stream does. If you need other
+work to proceed, run the waiting Capture in a separate terminal.
 
 ## Tests
 
