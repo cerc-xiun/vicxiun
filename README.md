@@ -94,6 +94,13 @@ vicxiun --playlist-limit 200 https://example.com/a-big-mix
 `--playlist-limit 0` turns the confirmation off. At or below the limit a
 playlist simply proceeds.
 
+A playlist's videos land in one folder of their own, named for the
+playlist — `Output/Uploader/Playlist title [playlist id]/` — with one
+file per video inside, named after that video. The same naming and
+safety rules apply to those files as to any other download. If the run
+stops part-way, re-running the same command skips the videos already on
+disk and fetches only the rest.
+
 ## Running out of disk space
 
 Free space is watched at two floors, so a full disk cannot ruin a recording.
@@ -180,10 +187,10 @@ Stated plainly, so nobody finds them by surprise:
   ([ADR-0006](docs/adr/0006-termux-is-the-android-path.md)).
 - **DRM and paywalled content is refused, permanently.** A feature, not a
   gap — see the statement at the top of this file.
-- **A playlist currently writes all its entries to one file** — each entry
-  overwrites the previous one, and only the last entry survives (the
-  confirmation question exists to guard the disk; per-entry naming is
-  tracked as [#23](https://github.com/cerc-xiun/vicxiun/issues/23)).
+- **A playlist that fails part-way keeps what finished.** A playlist
+  downloads one file per video into its own folder; a failure or an
+  interrupt stops the run there, and re-running the same command skips
+  what is already on disk and fetches only the rest.
 - **Windows cleanup after an interrupt is best-effort** — a `.part` file
   can remain if yt-dlp still holds it open; the next run finishes or skips
   the Item, so nothing is lost.

@@ -293,6 +293,32 @@ def test_plan_target_path_uses_unknown_uploader_when_missing(tmp_path: Path) -> 
     assert plan.target_path.parts[-2] == "_unknown"
 
 
+def test_resolve_plan_for_a_playlist_targets_its_folder(tmp_path: Path) -> None:
+    """A Playlist's Plan targets the Playlist's own output folder
+    (ticket #23): the same name a single video of this link would take,
+    minus the extension, and the executor puts one file per entry
+    inside it.
+    """
+    url = "https://example.com/mix"
+
+    def resolver(resolved: str) -> dict[str, object]:
+        return {
+            "_type": "playlist",
+            "title": "A Big Mix",
+            "uploader": "Chan",
+            "id": "pl123",
+            "playlist_count": 7,
+        }
+
+    plan = resolve_plan(url, PhoneSafeProfile(), tmp_path, resolver)
+    assert isinstance(plan.kind, DownloadKind)
+    assert plan.playlist_count == 7
+    assert plan.target_path.parent.parent.resolve() == tmp_path.resolve()
+    assert plan.target_path.parent.name == "Chan"
+    assert plan.target_path.name == "A Big Mix [pl123]"
+    assert plan.target_path.suffix == ""
+
+
 # ---------------------------------------------------------------------------
 # Profile / format description
 # ---------------------------------------------------------------------------
