@@ -223,8 +223,9 @@ def _download_playlist(
     built through the same sanitiser, traversal neutralisation and
     containment assertion a single video's Plan gets.
 
-    One yt-dlp call per entry means an entry that is already on disk is
-    skipped by yt-dlp itself, so a re-run after a mid-Playlist failure
+    One yt-dlp call per entry means an entry whose final file already
+    exists is reported as already downloaded and skipped by yt-dlp's
+    own no-overwrite default, so a re-run after a mid-Playlist failure
     fetches only what is missing. The function returns the folder; each
     finished entry is a complete file inside it.
 

@@ -120,6 +120,11 @@ def remove_partial_download(target: Path, preexisting: bool) -> None:
     not stop the rest.
     """
     if target.is_dir():
+        # Inside a playlist folder every file vicxiun or yt-dlp writes
+        # is an entry's own, and a finished entry always ends in the
+        # container extension, so a partial-suffix match cannot hit a
+        # final file. A visitor's own file that happens to end in one
+        # is out of scope here -- the folder is vicxiun's.
         for artifact in target.iterdir():
             if not _ARTIFACT_RE.search(artifact.name):
                 continue
