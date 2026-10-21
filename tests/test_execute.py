@@ -321,9 +321,9 @@ def test_interrupt_stops_the_queue_and_completed_items_stay_intact(
     _install_resolver(
         monkeypatch,
         {
-            "https://example.com/a": _BASIC_DOWNLOAD,
-            "https://example.com/b": _BASIC_DOWNLOAD,
-            "https://example.com/c": _BASIC_DOWNLOAD,
+            "https://example.com/a": {**_BASIC_DOWNLOAD, "video_id": "idA"},
+            "https://example.com/b": {**_BASIC_DOWNLOAD, "video_id": "idB"},
+            "https://example.com/c": {**_BASIC_DOWNLOAD, "video_id": "idC"},
         },
     )
 

@@ -160,6 +160,27 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--from-file",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Read links from FILE, one per line, handled after any "
+            "links given on the command line. Blank lines and lines "
+            "starting with '#' are ignored, so the list can carry notes."
+        ),
+    )
+    parser.add_argument(
+        "--no-skip",
+        action="store_true",
+        help=(
+            "Handle every link again even when its file is already in "
+            "the output folder or the skip record marks it done. By "
+            "default such Items are skipped, so re-running a Queue is "
+            "safe and downloads nothing twice."
+        ),
+    )
+    parser.add_argument(
         "links",
         nargs="*",
         metavar="LINK",
@@ -183,6 +204,24 @@ def settings_path() -> Path:
     from vicxiun.platform import settings_path as _settings_path
 
     return _settings_path()
+
+
+def read_links_file(path: Path) -> list[str]:
+    """Read a prepared list of links, one per line, in file order.
+
+    Blank lines and lines whose first non-space character is ``#`` are
+    ignored (ticket #14), so the list can carry notes. A ``#`` inside a
+    line is part of the link -- only a whole-line comment is a comment.
+    The BOM is tolerated, because Windows editors add one.
+    """
+    text = path.read_text(encoding="utf-8-sig")
+    links: list[str] = []
+    for line in text.splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        links.append(entry)
+    return links
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -212,6 +251,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # The prepared list, if any, is argument handling: a file that
+    # cannot be read is a user error (exit 2) before anything runs.
+    # Command-line links come first, then the file's, in file order.
+    links = list(args.links)
+    if args.from_file is not None:
+        from_file = args.from_file.expanduser()
+        try:
+            links.extend(read_links_file(from_file))
+        except OSError as exc:
+            print(
+                f"error: cannot read --from-file {from_file}: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+
     # Saved settings are consulted before the run; a flag given on
     # this run wins for this run only and is never written back.
     saved, warning = load_settings(settings_path())
@@ -222,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if code != 0:
         return code
 
-    if not args.links:
+    if not links:
         parser.error("at least one LINK is required")
 
     if args.wait_interval < 1:
@@ -246,9 +300,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_root = Path(folder).expanduser() if folder else default_output_root()
 
     if args.dry_run:
-        return _run_dry_run(parser, args, profile, output_root)
+        return _run_dry_run(parser, args, links, profile, output_root)
 
-    return _run_real(parser, args, profile, output_root)
+    return _run_real(parser, args, links, profile, output_root)
 
 
 # ---------------------------------------------------------------------------
@@ -259,17 +313,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _run_dry_run(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
+    links: list[str],
     profile,
     output_root: Path,
 ) -> int:
     """Resolve each Item to a Plan, print it, and stop.
 
     Behaviour is the same as before ticket #8 -- only the real run
-    path is new.
+    path is new. ``links`` is the command-line links plus any
+    ``--from-file`` entries, already expanded (ticket #14). Skipping
+    does not apply here: a preview resolves and prints every link, and
+    the no-write guarantee means it never reads or writes the skip
+    record.
     """
     plans: list[Plan] = []
     failures: list[tuple[str, BaseException]] = []
-    for link in args.links:
+    for link in links:
         try:
             plan = resolve_plan(
                 link,
@@ -303,6 +362,7 @@ def _run_dry_run(
 def _run_real(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
+    links: list[str],
     profile,
     output_root: Path,
 ) -> int:
@@ -312,20 +372,22 @@ def _run_real(
     continues past failures, and stops cleanly on an interrupt
     (ticket #13): completed Items stay finished, the rest are named as
     not run, and the exit code reflects partial success or the
-    interrupt.
+    interrupt. With the default skipping (ticket #14) it also skips
+    Items the user already has; ``--no-skip`` turns that off.
 
     The closing summary is on stderr, alongside the per-Item result
     lines and the progress lines, so a single coherent stream carries
     everything the user sees while the run happens.
     """
     outcome = run_queue(
-        args.links,
+        links,
         profile=profile,
         output_root=output_root,
         resolver=_resolve_metadata,
         executor=_execute_plan,
         wait_for_stream=args.wait_for_stream,
         wait_interval=args.wait_interval,
+        skip_existing=not args.no_skip,
     )
     print(outcome.summary(), end="", file=sys.stderr)
     return outcome.exit_code()

@@ -17,6 +17,9 @@ dist/
 # Downloaded media -- large binaries, never commit
 downloads/
 
+# vicxiun's own skip record, when the tool is run against this checkout
+.vicxiun-done.txt
+
 # Installed skill bodies; restore with: npx skills experimental_install
 .agents/skills/
 .opencode/skills/

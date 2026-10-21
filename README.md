@@ -15,8 +15,9 @@ of the design, not a limitation.
 
 The package installs, the `vicxiun` command exists, and `--dry-run` resolves
 links into a printable Plan without downloading anything. Downloads, live
-captures, waiting for a scheduled stream, the sequential Queue and remembered
-settings work; what is left of Milestone 1 is tracked in the
+captures, waiting for a scheduled stream, the sequential Queue, remembered
+settings, supplying links from a file and skipping what you already have all
+work; what is left of Milestone 1 is tracked in the
 [issue tracker](https://github.com/cerc-xiun/vicxiun/issues).
 
 ## Requirements
@@ -57,6 +58,27 @@ immediately.
 A waiting Item **blocks the Queue**: the Queue handles one Item at a time, so
 the links after it will not start until the stream does. If you need other
 work to proceed, run the waiting Capture in a separate terminal.
+
+## A list of links, and skipping what you already have
+
+Hand the tool a prepared list in one go:
+
+```console
+vicxiun --from-file links.txt
+```
+
+The file holds one link per line, handled in order. Blank lines and lines
+starting with `#` are ignored, so the list can carry notes. Links typed on the
+command line are handled first, then the file's lines.
+
+By default an Item you already have is skipped, so re-running the same command
+is safe and downloads nothing twice. Two things count as "already have it":
+
+- the Item's file is already in the output folder, or
+- the Item was finished by an earlier run: finished Items are noted in
+  `.vicxiun-done.txt`, kept beside the output.
+
+Pass `--no-skip` to handle every link again regardless.
 
 ## Tests
 

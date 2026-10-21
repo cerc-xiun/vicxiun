@@ -78,6 +78,32 @@ settings file location inside Termux's private home is standard but
   final file before the interrupt can say anything). Accepted;
   re-running finishes it. If a `skip-existing` ticket lands later
   (#22 in the user stories), it makes this corner rarer still.
+  **Resolved by #14**: skip-existing landed, so a re-run skips an Item
+  whose file is already present — reaching that corner now needs
+  `--no-skip`.
 - Cleanup on Windows is per-file best-effort (`except OSError`) —
   yt-dlp can still hold an open `.part` handle when the interrupt
   arrives.
+
+## From #14 (Link file + skip-existing)
+
+- The skip record is `<output_root>/.vicxiun-done.txt`, one URL per
+  line, exact-string match against the link as typed (ADR-0010). It is
+  NOT a download history: no timestamps, rewritten in place after each
+  finished Item, failures never recorded.
+- Skip order matters: the record check runs in `run_queue` before any
+  resolve (a re-run of a completed Job does zero network), and the
+  file-presence check runs in `run_item` right after `resolve_plan`,
+  BEFORE the stop-instruction print and the wait-for-stream loop — so
+  a Capture whose MKV already exists is skipped without waiting.
+- `--dry-run` ignores skipping entirely and never reads or writes the
+  record — the spec's no-write guarantee is untouched.
+- Tests reuse one metadata dict across links at your peril: equal
+  title/uploader/id means one target path, and the second link is now
+  *skipped* by design. Old suite needed distinct video_ids. Any new
+  multi-link test must give each link its own id.
+- Counts line gains a middle segment only when something was skipped:
+  "0 ok, 2 skipped, 0 failed." — "N ok, M failed." shape is unchanged
+  otherwise, so older assertions still hold.
+- For #15 (large-playlist warn): decide whether skipped/recorded Items
+  count toward the 50-Item threshold — they were asked for either way.
