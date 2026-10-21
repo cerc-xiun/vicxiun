@@ -94,6 +94,19 @@ vicxiun --playlist-limit 200 https://example.com/a-big-mix
 `--playlist-limit 0` turns the confirmation off. At or below the limit a
 playlist simply proceeds.
 
+## Running out of disk space
+
+Free space is watched at two floors, so a full disk cannot ruin a recording.
+Before a Capture starts, the output volume must have at least 2 GB free; below
+that the Capture does not start, and the message says what is required and
+what is available. While anything is being written, free space is checked
+every few seconds; below 500 MB the transfer stops the same way a deliberate
+stop does — a Capture leaves the recording made so far, playable, and a
+Download is cleared of partial files so a re-run starts clean. Both messages
+name the floor, the space that was left, and what to do next. A Download is
+not subject to the before-Capture floor. The floors are constants in
+`vicxiun/diskspace.py` for easy changing.
+
 ## Tests
 
 ```console

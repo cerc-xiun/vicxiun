@@ -73,3 +73,15 @@ A program outside this project that the tool needs in order to finish an Item,
 such as a media muxer or a JavaScript runtime. Prerequisites are detected and
 explained, never installed for the user.
 _Avoid_: dependency, requirement, helper, tool
+
+**Pre-flight floor**:
+The free space a volume must have before a Capture starts. Below it the
+Capture does not start, and the message says what is required and what is
+available. A Download is not subject to it.
+_Avoid_: minimum space, disk check, space limit
+
+**Running floor**:
+The free space below which an Item mid-transfer is stopped cleanly — the
+same shutdown path as a deliberate stop — so a Capture still leaves a
+playable file.
+_Avoid_: low-disk warning, cutoff, kill
