@@ -140,3 +140,29 @@ settings file location inside Termux's private home is standard but
   playlists become a real use case. Do not "fix" this by switching to
   yt-dlp's own output templates: that bypasses vicxiun's hostile-title
   sanitisation (security surface, spec rule 43).
+  **Ticket #23 created for this** while working on #18.
+
+## From #18 (README + Android docs)
+
+- `--dry-run` was broken against ANY real link on `main`: yt-dlp's raw
+  info dict names the video id `id` (not `video_id`) and carries no
+  `format_description`, while `plan._to_metadata` demands both. Fixed
+  by `normalise_resolver_result` at the engine resolver seam (injected
+  test fakes still pass through unchanged); three unit tests pin it in
+  `tests/test_engine.py`. Caveat: the mapped `format_description` is
+  built from `resolution` + `ext` and is a dry-run DISPLAY string only
+  -- do not build decisions on it.
+- Every command in the README was executed against the real CLI (real
+  network where the command needs it): `--help`, `--version`,
+  `--dry-run` (video + `--wait-for-stream` + `--from-file`),
+  `--playlist-limit` real-run decline path,
+  `vicxiun settings [key [value]]`, `uv run pytest` (285 passed, 1
+  skipped). NOT yet verified: a real scheduled-stream wait, the PyPI
+  install commands (#20), anything on a real device (#21) --
+  docs/android.md says so explicitly.
+- `docs/android.md` is the new Android page; README links to it and
+  lists known limitations (incl. the #23 playlist single-file limit
+  and the iOS refusal). If #21 or #20 change the story, update both
+  pages.
+- Ticket #23 (playlist one-file-per-entry) was created while working
+  on #18; the WARY entry in "From #15" records it.
