@@ -166,3 +166,51 @@ settings file location inside Termux's private home is standard but
   pages.
 - Ticket #23 (playlist one-file-per-entry) was created while working
   on #18; the WARY entry in "From #15" records it.
+
+## From #12 (Disk-space protection)
+
+- The running-floor stop is a `KeyboardInterrupt` raised from a
+  progress hook (`vicxiun.diskspace.disk_watch`), so the shutdown
+  path, the summary wording ("Interrupted: N Item(s) were not run.")
+  and exit 130 are the deliberate-stop contract reused verbatim —
+  what the ticket meant by "clean shutdown, not a kill". Low space
+  reports exit 130 like an interrupt; do not "fix" the summary
+  wording to say "disk" unless the Queue learns a second stop
+  reason.
+- The check rides yt-dlp's progress hooks, throttled by
+  `time.monotonic` to one measure per `CHECK_INTERVAL_SECONDS`.
+  Tests fake the clock at
+  `monkeypatch.setattr("vicxiun.diskspace.time.monotonic", ...)` —
+  the mirror of the `queue.time.sleep` pattern — and fake space at
+  `monkeypatch.setattr(vicxiun.diskspace, "free_bytes", ...)` (plain
+  value, `_free_space` style, or a sequence via
+  `_free_space_sequence` for "room at pre-flight, short mid-run").
+  Known limit: a transfer whose hooks never fire is never checked.
+- The merge/postprocess phase is NOT covered by the running check
+  (hooks stop at download end). A merge that fills the disk
+  surfaces as a DownloadError → UserError, not a clean stop; the
+  pre-flight floor's headroom is the guard there.
+- `free_bytes` walks up to the nearest existing ancestor of the
+  target (a first run's output folders do not exist yet). An
+  unmeasurable volume (`OSError`) skips the check instead of failing
+  the run — a guard must not break the run it guards, and printing
+  it would spam one line per interval.
+- On a real **live** fragment download, yt-dlp's fragment loop catches
+  the hook's KeyboardInterrupt for live streams and converts it to a
+  graceful finish (it finalises the recording instead of propagating;
+  `downloader/fragment.py`). So `SpaceWatch` carries a `tripped`
+  flag: `run_item` re-raises after the executor returns and ends the
+  Item on the interrupt path all the same. Consequence worth knowing
+  for the #10 real-device work: a real Ctrl+C landing inside the
+  fragment download of a live Capture is ALSO swallowed this way by
+  yt-dlp itself — the file is finalised and kept, but the outcome can
+  be "ok" instead of 130 depending on where the signal lands. That is
+  existing yt-dlp behaviour, not new in #12; verifying the deliberate
+  stop with a real stream (checklist steps 3–5) should record whether
+  exit was 130 or 0.
+- The manual checklist gained "The disk that runs short" (steps
+  16–19). As the #10 note says for #11: run it on a real device
+  before claiming #12 fully verified — the automated tests prove
+  the Queue paths, not yt-dlp's real hook cadence.
+- README gained "Running out of disk space"; GLOSSARY gained
+  Pre-flight floor and Running floor.

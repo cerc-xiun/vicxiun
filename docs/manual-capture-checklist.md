@@ -73,6 +73,25 @@ and the site.
     instruction shown before it. Stop and verify the file as in
     steps 3-5.
 
+## The disk that runs short
+
+16. Make the output volume nearly full — or point `--folder` at a small
+    drive — so a Capture would start with less than 2 GB free.
+    Expected: the Capture does not start; the line on stderr names
+    2 GB as what is required and the real free space as available,
+    and the Queue continues (or, if every Item was refused, exits 2).
+17. Start a Capture with room, then fill the same volume while it
+    records (copy large files onto it from another terminal).
+    Expected: the recording stops by itself; the message names the
+    500 MB floor, the space that was left, and what to do next; the
+    kept path is printed and the file opens (verify as in steps 3–5).
+18. Repeat step 17 with a Download. Expected: it stops with no
+    `.part` / `.ytdl` / `.fNNN.*` files left beside the target and
+    no final file at all (or none that fails to open).
+19. With the volume still below 2 GB free, run a Download. Expected:
+    the Download IS attempted — the pre-flight floor is
+    Capture-only — and it proceeds while above the running floor.
+
 ## Android/Termux notes
 
 - The Settings file lives in Termux's private home; check that this

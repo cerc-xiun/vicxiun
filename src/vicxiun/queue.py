@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from vicxiun.capture import STOP_INSTRUCTION, after_interrupt
+from vicxiun.diskspace import RUNNING_FLOOR_BYTES, SpaceWatch, capture_pre_flight
 from vicxiun.engine import default_progress_printer
 from vicxiun.errors import (
     EXIT_CODE,
@@ -380,6 +381,16 @@ def run_item(
     answers whether the run may begin. Declining downloads nothing
     for that Item and stops the Queue; a limit of 0 (or no callback)
     never asks.
+
+    Disk space is protected at two floors (ticket #12). Before a
+    Capture starts, the target volume must hold the pre-flight floor
+    -- below it the Capture does not start and the Item fails; a
+    Download is exempt. While any Item is written, free space is
+    watched through the progress hook; falling below the running
+    floor raises the KeyboardInterrupt a deliberate stop raises, so
+    the aftermath -- a Capture's kept recording, a Download cleaned
+    of partials -- and the Queue's interrupt follow-through are
+    exactly the deliberate-stop behaviour.
     """
     try:
         plan = resolve_plan(link, profile, output_root, resolver, wait_for_stream)
@@ -424,13 +435,32 @@ def run_item(
             )
             return ItemResult(link=link, path=None, error=None, declined=True)
 
-    progress = default_progress_printer()
     if isinstance(plan.kind, CaptureKind):
         print(STOP_INSTRUCTION, file=sys.stderr)
     if plan.wait_for_stream and _is_waiting_capture(plan):
         plan = _wait_for_stream_start(
             plan, profile, output_root, resolver, wait_interval
         )
+    # Before a Capture starts, the pre-flight floor applies (ticket
+    # #12) -- here, after any wait, so the Plan is the final one: a
+    # device that cannot promise the space is not handed a recording at
+    # all. A Download is deliberately exempt; the running check covers
+    # it alone. The refusal is a per-Item failure and the Queue moves
+    # on, as with any failure.
+    if isinstance(plan.kind, CaptureKind):
+        refusal = capture_pre_flight(plan.target_path)
+        if refusal is not None:
+            result = ItemResult(link=link, path=None, error=UserError(refusal))
+            _record_failure(result)
+            return result
+    # While anything is written, free space is watched (ticket #12):
+    # below the running floor the hook stops the transfer exactly the
+    # way a deliberate stop does -- a KeyboardInterrupt -- so the
+    # aftermath is the interrupt path's, unchanged. The watch composes
+    # with the progress printer, so progress lines still flow.
+    watch = SpaceWatch(
+        plan.target_path, RUNNING_FLOOR_BYTES, follow=default_progress_printer()
+    )
     # Snapshot after any wait, just before the executor runs: on a
     # Download interrupt the cleanup deletes only a file the Item
     # itself created; anything on disk beforehand is a completed record
@@ -438,7 +468,13 @@ def run_item(
     # target path) with a fresh one, so the snapshot follows it.
     preexisting = plan.target_path.is_file()
     try:
-        actual = executor(plan, progress)
+        actual = executor(plan, watch)
+        if watch.tripped:
+            # The hook's KeyboardInterrupt was converted to a graceful
+            # finish by yt-dlp's live fragment downloader (it catches
+            # the interrupt for live streams and finalises instead of
+            # propagating): end the Item as a stop just the same.
+            raise KeyboardInterrupt("stopped by the low-space check")
     except KeyboardInterrupt:
         detail, kept = after_interrupt(plan, preexisting)
         result = ItemResult(link=link, path=kept, error=KeyboardInterrupt(detail))
@@ -579,7 +615,10 @@ def run_queue(
     Items after it -- documented, with the separate-terminal workaround.
     A ``KeyboardInterrupt`` stops the Queue: the Item in flight is
     recorded as interrupted, the rest are marked not run, and the
-    Items that already finished are untouched.
+    Items that already finished are untouched. The low-space running
+    floor (ticket #12) stops a transfer the same way -- the raised
+    exception is a ``KeyboardInterrupt``, so the Queue stops and the
+    later Items are named as not run, exit 130 and all.
 
     With ``skip_existing`` (the default, ticket #14), a link named in
     the skip record beside the output is skipped before any resolve --
