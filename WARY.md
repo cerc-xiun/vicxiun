@@ -24,6 +24,8 @@ was deliberately left alone rather than bundled into a feature ticket.
 runs `uv run pytest` only), so CI green does not mean format-clean.
 Worth its own one-line cleanup ticket: `uv run ruff format .` + test.
 **Ticket #22 created for this** while working on #10.
+**Resolved by #22**: the 10 drifted files were reformatted and
+`ruff format --check .` now runs in CI before the test suite.
 
 ## From #16 (Settings)
 
@@ -214,6 +216,17 @@ settings file location inside Termux's private home is standard but
   the Queue paths, not yt-dlp's real hook cadence.
 - README gained "Running out of disk space"; GLOSSARY gained
   Pre-flight floor and Running floor.
+
+## From #22 (Format gate)
+
+- `uv run ruff format --check .` now runs in CI on every push and PR,
+  before the test suite. A push with drifted files fails at the format
+  step, not at pytest. Run `uv run ruff format .` before committing;
+  the fixed point is `56 files already formatted`.
+- The drift commit is format-only (10 files; `plan.py`, `engine.py`
+  shrank the most): long type aliases and string arguments that ruff
+  had wrapped differently, plus a missing final newline in
+  `engine.py`. No behaviour change; the full suite passed unchanged.
 
 ## From #17 (Security audit)
 
