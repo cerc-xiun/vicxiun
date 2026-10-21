@@ -26,7 +26,9 @@ from vicxiun.plan import (
 )
 from vicxiun.prereqs import run as run_prereq_check
 from vicxiun.queue import (
+    DEFAULT_PLAYLIST_LIMIT,
     DEFAULT_WAIT_INTERVAL,
+    ConfirmCallable,
     ExecutorCallable,
     ResolverCallable,
     run_queue,
@@ -43,6 +45,7 @@ PROG = "vicxiun"
 _resolver: ResolverCallable | None = None
 _executor: ExecutorCallable | None = None
 _prereq_check: Callable[[], int] | None = None
+_confirm: ConfirmCallable | None = None
 
 
 def set_resolver(resolver: ResolverCallable) -> None:
@@ -69,6 +72,12 @@ def set_prereq_check(prereq_check: Callable[[], int]) -> None:
     _prereq_check = prereq_check
 
 
+def set_confirm(confirm: ConfirmCallable) -> None:
+    """Replace the large-playlist confirmation used by ``main`` (test seam)."""
+    global _confirm
+    _confirm = confirm
+
+
 def _run_prereq_check() -> int:
     """Honour the test seam if one is installed; else run the real check."""
     if _prereq_check is not None:
@@ -91,6 +100,24 @@ def _execute_plan(
     if _executor is not None:
         return _executor(plan, on_progress)
     return build_default_engine().execute(plan, on_progress)
+
+
+def _confirm_playlist(count: int) -> bool:
+    """Ask the user to confirm a very large playlist (ticket #15).
+
+    Falls back to the real prompt in production; the Queue has already
+    printed what the playlist holds. An empty answer, a closed stdin
+    (EOF) or anything but yes declines, so a non-interactive run (for
+    example a script piping links in) downloads nothing rather than
+    guessing.
+    """
+    if _confirm is not None:
+        return _confirm(count)
+    try:
+        answer = input("Continue? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,6 +205,18 @@ def build_parser() -> argparse.ArgumentParser:
             "the output folder or the skip record marks it done. By "
             "default such Items are skipped, so re-running a Queue is "
             "safe and downloads nothing twice."
+        ),
+    )
+    parser.add_argument(
+        "--playlist-limit",
+        type=int,
+        default=DEFAULT_PLAYLIST_LIMIT,
+        metavar="N",
+        help=(
+            "Ask for confirmation before handling a playlist with "
+            "more than N Items, so a link that turns out to be a "
+            "whole channel is never fetched without your OK. Defaults "
+            "to 50; 0 turns the confirmation off."
         ),
     )
     parser.add_argument(
@@ -281,6 +320,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.wait_interval < 1:
         parser.error("--wait-interval must be a whole number of seconds, at least 1")
+
+    if args.playlist_limit < 0:
+        parser.error("--playlist-limit must be 0 (off) or a positive number of Items")
 
     try:
         profile = profile_from_name(
@@ -388,6 +430,8 @@ def _run_real(
         wait_for_stream=args.wait_for_stream,
         wait_interval=args.wait_interval,
         skip_existing=not args.no_skip,
+        confirm=_confirm_playlist,
+        playlist_limit=args.playlist_limit,
     )
     print(outcome.summary(), end="", file=sys.stderr)
     return outcome.exit_code()

@@ -227,6 +227,10 @@ class Metadata:
     format_description: str
     video_id: str
     live_status: str = ""
+    # A playlist (a link that resolves to many videos) reports how many
+    # Items it holds; a plain video is not a playlist and reports 0
+    # (ticket #15).
+    playlist_count: int = 0
 
 
 class MetadataResolver(Protocol):
@@ -240,9 +244,54 @@ class MetadataResolver(Protocol):
 
 
 def _to_metadata(raw: object) -> Metadata:
-    """Coerce an engine dict (or test fake) into a ``Metadata``."""
+    """Coerce an engine dict (or test fake) into a ``Metadata``.
+
+    A playlist (``_type == "playlist"``) is a link that resolves to many
+    videos (ticket #15): it carries a ``playlist_count`` instead of the
+    per-video fields, which are filled with the playlist's own values --
+    the count is what the large-playlist confirmation needs, and the
+    per-video shape is what ``resolve_plan`` and the paths module need
+    to keep working unchanged.
+    """
     if not isinstance(raw, dict):
         raise MetadataError("engine returned a non-mapping value")
+    if raw.get("_type") == "playlist":
+        # A playlist reports how many Items it holds (ticket #15). The
+        # count must be known and truthful: it is what the confirmation
+        # works from, and a silent zero would let a whole channel
+        # download unconfirmed -- the exact harm ticket #15 exists to
+        # prevent. yt-dlp reports ``playlist_count``; the flat entries
+        # themselves are the fallback.
+        count_raw = raw.get("playlist_count")
+        if count_raw is None:
+            entries = raw.get("entries")
+            if entries is not None:
+                try:
+                    count_raw = len(entries)
+                except TypeError:
+                    count_raw = None
+        if count_raw is None:
+            raise MetadataError(
+                "engine result is a playlist but does not say how many "
+                "Items it holds"
+            )
+        try:
+            count = int(count_raw)
+        except (TypeError, ValueError) as exc:
+            raise MetadataError(
+                f"engine result has an unusable playlist count: {count_raw!r}"
+            ) from exc
+        if "title" not in raw:
+            raise MetadataError("engine result missing keys: ['title']")
+        return Metadata(
+            title=str(raw["title"]),
+            uploader=str(raw.get("uploader") or raw.get("channel") or ""),
+            ext="",
+            is_live=False,
+            format_description=f"playlist of {count} Items",
+            video_id=str(raw.get("id") or ""),
+            playlist_count=count,
+        )
     keys = (
         "title",
         "uploader",
@@ -282,6 +331,9 @@ class Plan:
     format_description: str
     target_path: Path
     wait_for_stream: bool = False
+    # How many Items the link's playlist holds; 0 for a plain video
+    # (ticket #15).
+    playlist_count: int = 0
 
     def render(self) -> str:
         """Return a human-readable block describing this Plan."""
@@ -290,11 +342,15 @@ class Plan:
             if self.wait_for_stream
             else "would not wait"
         )
+        playlist_text = (
+            f"  Playlist : {self.playlist_count} Items\n" if self.playlist_count else ""
+        )
         return (
             f"Plan for: {self.url}\n"
             f"  Item kind : {self.kind.name}\n"
             f"  Profile   : {self.profile.name}\n"
             f"  Format    : {self.format_description}\n"
+            f"{playlist_text}"
             f"  Target    : {self.target_path}\n"
             f"  Stream    : {wait_text}\n"
         )
@@ -367,6 +423,7 @@ def resolve_plan(
         format_description=metadata.format_description,
         target_path=target_path,
         wait_for_stream=wait_for_stream and isinstance(kind, CaptureKind),
+        playlist_count=metadata.playlist_count,
     )
 
 

@@ -18,6 +18,12 @@ One link, treated as exactly one thing to handle: either a Download or a
 Capture.
 _Avoid_: entry, request, task, video
 
+**Playlist**:
+A link that resolves to many videos at once. Not the Queue — the Queue is
+the tool's own sequential handling of the links you typed. The tool asks
+before handling a Playlist above the playlist limit.
+_Avoid_: channel, mix, collection
+
 **Download**:
 An Item whose link points at a finished video, kept as one playable file
 holding both picture and sound.

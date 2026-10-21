@@ -61,6 +61,14 @@ ExecutorCallable = Callable[[Plan, Callable[[dict[str, object]], None] | None], 
 # (ticket #11). Seconds; overridable with ``--wait-interval``.
 DEFAULT_WAIT_INTERVAL = 60
 
+# A playlist with more Items than this asks for confirmation before it
+# starts (ticket #15). Overridable with ``--playlist-limit``.
+DEFAULT_PLAYLIST_LIMIT = 50
+
+# The confirmation callback for a very large playlist (ticket #15):
+# given the count of Items found, it answers whether the run may start.
+ConfirmCallable = Callable[[int], bool]
+
 # The skip record lives alongside the output (ticket #14): a plain
 # text file in the output root, one URL per line.
 SKIP_RECORD_NAME = ".vicxiun-done.txt"
@@ -160,12 +168,16 @@ class ItemResult:
     done, not failed. ``path`` says where the file already is when the
     skip was decided by file presence, and stays ``None`` when the
     skip came from the record (whose check runs before any resolve).
+    A declined Item (ticket #15) carries no error either: the user
+    said no to a very large playlist, so nothing was downloaded and
+    the Queue stops cleanly.
     """
 
     link: str
     path: Path | None
     error: BaseException | None
     skipped: bool = False
+    declined: bool = False
 
 
 _OUTCOME_LABELS: dict[type[BaseException], str] = {
@@ -197,6 +209,21 @@ def _classify_failure(exc: BaseException) -> BaseException:
         if isinstance(exc, cls):
             return exc
     return UnexpectedFailure(str(exc))
+
+
+def _exit_code_for_class(cls: type[BaseException]) -> int:
+    """The exit code for a named-error class, by its nearest named ancestor.
+
+    A failure can carry a named-error subclass that is not itself a key
+    in ``EXIT_CODE`` (``MetadataError`` is a ``UserError``, for
+    example); the MRO decides, and anything truly unnamed is treated as
+    an unexpected failure.
+    """
+    for ancestor in cls.__mro__:
+        code = EXIT_CODE.get(ancestor)
+        if code is not None:
+            return code
+    return EXIT_CODE[UnexpectedFailure]
 
 
 def _deepest_named(failures: list[ItemResult]) -> type[BaseException]:
@@ -318,6 +345,8 @@ def run_item(
     wait_for_stream: bool = False,
     wait_interval: int = DEFAULT_WAIT_INTERVAL,
     skip_existing: bool = True,
+    confirm: ConfirmCallable | None = None,
+    playlist_limit: int = DEFAULT_PLAYLIST_LIMIT,
 ) -> ItemResult:
     """Run a single Item; return its outcome.
 
@@ -344,6 +373,13 @@ def run_item(
     stop-instruction and the wait-for-stream loop, so a Capture whose
     file exists is skipped without waiting for a stream. The caller
     records the skip, so later runs skip the resolve too.
+
+    With a ``confirm`` callback (ticket #15), a playlist whose
+    ``playlist_count`` is above ``playlist_limit`` asks before it
+    starts -- the callback is given the count of Items found and
+    answers whether the run may begin. Declining downloads nothing
+    for that Item and stops the Queue; a limit of 0 (or no callback)
+    never asks.
     """
     try:
         plan = resolve_plan(link, profile, output_root, resolver, wait_for_stream)
@@ -363,6 +399,30 @@ def run_item(
         file=sys.stderr,
     )
     print(f"  target: {plan.target_path}", file=sys.stderr)
+
+    # A very large playlist asks before it starts (ticket #15): the
+    # count comes from the resolve, so the question is asked before any
+    # of the playlist is fetched. The statement of how many Items were
+    # found belongs here, whatever confirm implementation answers it.
+    # Declining is not a failure -- nothing was downloaded and the
+    # Queue stops cleanly.
+    if (
+        confirm is not None
+        and playlist_limit > 0
+        and plan.playlist_count > playlist_limit
+    ):
+        print(
+            f"This playlist holds {plan.playlist_count} Items. Downloading "
+            "all of them may take a long time and fill your disk.",
+            file=sys.stderr,
+        )
+        if not confirm(plan.playlist_count):
+            print(
+                f"{link}: declined (playlist of {plan.playlist_count} Items; "
+                "nothing was downloaded)",
+                file=sys.stderr,
+            )
+            return ItemResult(link=link, path=None, error=None, declined=True)
 
     progress = default_progress_printer()
     if isinstance(plan.kind, CaptureKind):
@@ -408,16 +468,24 @@ class QueueOutcome:
     (an interrupted in-progress Item is recorded as interrupted).
     ``interrupted`` is True only when the run was stopped by an
     interrupt; the never-started Items are simply the links minus
-    ``results`` and are named in the summary.
+    ``results`` and are named in the summary. ``declined`` is True
+    when the run was stopped by the user declining a very large
+    playlist (ticket #15) -- nothing failed and nothing of that
+    playlist was downloaded; the Items after it are named as not run.
     """
 
     links: tuple[str, ...]
     results: list[ItemResult]
     interrupted: bool = False
+    declined: bool = False
 
     @property
     def successes(self) -> list[ItemResult]:
-        return [r for r in self.results if r.error is None and not r.skipped]
+        return [
+            r
+            for r in self.results
+            if r.error is None and not r.skipped and not r.declined
+        ]
 
     @property
     def skipped(self) -> list[ItemResult]:
@@ -435,11 +503,16 @@ class QueueOutcome:
         omitted from the counts line when nothing was skipped, so the
         "N ok, M failed." shape is unchanged for every other Job. When
         the run was interrupted the remaining Items are named as not
-        run.
+        run. A declined playlist is named in its own line (ticket #15),
+        and the Items after it are named as not run.
         """
         lines: list[str] = []
         for r in self.results:
-            if r.skipped:
+            if r.declined:
+                lines.append(
+                    f"declined: {r.link} (not downloaded without confirmation)"
+                )
+            elif r.skipped:
                 if r.path is not None:
                     lines.append(f"skipped: {r.link} (file already present: {r.path})")
                 else:
@@ -452,9 +525,15 @@ class QueueOutcome:
         if self.interrupted:
             not_started = len(self.links) - len(self.results)
             lines.append(f"Interrupted: {not_started} Item(s) were not run.")
+        elif self.declined:
+            not_started = len(self.links) - len(self.results)
+            lines.append(f"Declined: {not_started} Item(s) were not run.")
+        declined_items = [r for r in self.results if r.declined]
         counts = f"{len(self.successes)} ok"
         if self.skipped:
             counts += f", {len(self.skipped)} skipped"
+        if declined_items:
+            counts += f", {len(declined_items)} declined"
         counts += f", {len(self.failures)} failed."
         lines.append(counts)
         return "\n".join(lines) + "\n"
@@ -475,7 +554,7 @@ class QueueOutcome:
             return 0
         if self.successes:
             return EXIT_CODE[PartialSuccess]
-        return EXIT_CODE[_deepest_named(failures)]
+        return _exit_code_for_class(_deepest_named(failures))
 
 
 def run_queue(
@@ -488,6 +567,8 @@ def run_queue(
     wait_for_stream: bool = False,
     wait_interval: int = DEFAULT_WAIT_INTERVAL,
     skip_existing: bool = True,
+    confirm: ConfirmCallable | None = None,
+    playlist_limit: int = DEFAULT_PLAYLIST_LIMIT,
 ) -> QueueOutcome:
     """Handle every Item in ``links`` strictly sequentially.
 
@@ -508,6 +589,12 @@ def run_queue(
     rewritten after each one: an interrupt mid-Queue still keeps every
     completed Item in the record. ``skip_existing=False`` runs every
     link again; the record itself is still kept up to date.
+
+    With a ``confirm`` callback (ticket #15), a playlist above
+    ``playlist_limit`` Items asks before it starts; declining stops the
+    Queue cleanly -- the declined Item downloads nothing, is not
+    written to the record (it is not done), and the Items after it do
+    not start. A limit of 0, or no callback, never asks.
     """
     record, warning = SkipRecord.load(output_root / SKIP_RECORD_NAME)
     if warning:
@@ -515,6 +602,7 @@ def run_queue(
 
     results: list[ItemResult] = []
     interrupted = False
+    declined = False
     for index, link in enumerate(links):
         if skip_existing and link in record:
             print(f"{link}: skipped (in the skip record)", file=sys.stderr)
@@ -530,6 +618,8 @@ def run_queue(
                     wait_for_stream=wait_for_stream,
                     wait_interval=wait_interval,
                     skip_existing=skip_existing,
+                    confirm=confirm,
+                    playlist_limit=playlist_limit,
                 )
             except KeyboardInterrupt:
                 # An interrupt during planning or reporting -- the Item in
@@ -544,7 +634,7 @@ def run_queue(
                         "interrupted before this Item finished",
                     ),
                 )
-            if result.error is None:
+            if result.error is None and not result.declined:
                 # Finished, or skipped because the file is already
                 # there: either way the user has it. Noted at once, so
                 # an interrupt later in the Queue loses nothing.
@@ -559,16 +649,25 @@ def run_queue(
             # the run is interrupted -- the Items after it do not start.
             interrupted = True
             break
+        if result.declined:
+            # The user said no to a very large playlist (ticket #15):
+            # nothing was downloaded, and the Items after it do not
+            # start.
+            declined = True
+            break
     return QueueOutcome(
         links=tuple(links),
         results=results,
         interrupted=interrupted,
+        declined=declined,
     )
 
 
 __all__ = [
+    "DEFAULT_PLAYLIST_LIMIT",
     "DEFAULT_WAIT_INTERVAL",
     "SKIP_RECORD_NAME",
+    "ConfirmCallable",
     "ItemResult",
     "QueueOutcome",
     "SkipRecord",
