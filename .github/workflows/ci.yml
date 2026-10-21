@@ -36,5 +36,8 @@ jobs:
       - name: Check the lockfile is up to date and sync the environment
         run: uv sync --locked
 
+      - name: Check the formatting is clean
+        run: uv run ruff format --check .
+
       - name: Run the test suite
         run: uv run pytest

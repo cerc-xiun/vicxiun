@@ -130,9 +130,7 @@ _PROFILES: dict[str, Profile] = {
         Profile(
             name="best",
             format_selector="bestvideo*+bestaudio/best",
-            format_description=(
-                "bestvideo + bestaudio in the source container"
-            ),
+            format_description=("bestvideo + bestaudio in the source container"),
             container="mkv",
             # No height cap and no codec preference: the user asked for the
             # most the source has, so yt-dlp's own ordering is the answer.
@@ -161,9 +159,7 @@ _PROFILES: dict[str, Profile] = {
             # the /best fallback takes the separate streams when they
             # are there and a merged file when they are not.
             format_selector="bestvideo*+bestaudio/best",
-            format_description=(
-                "bestvideo+bestaudio recorded as MKV until stopped"
-            ),
+            format_description=("bestvideo+bestaudio recorded as MKV until stopped"),
             container="mkv",
             # No cap and no codec preference: record what the stream
             # offers rather than what a phone would want.
@@ -178,8 +174,7 @@ def profile_from_name(name: str) -> Profile:
     """Return the Profile named ``name``, or raise ``UserError``."""
     if name not in _PROFILES:
         raise UserError(
-            f"unknown profile: {name!r}; "
-            f"expected one of {sorted(_PROFILES)}",
+            f"unknown profile: {name!r}; expected one of {sorted(_PROFILES)}",
         )
     return _PROFILES[name]
 
@@ -272,8 +267,7 @@ def _to_metadata(raw: object) -> Metadata:
                     count_raw = None
         if count_raw is None:
             raise MetadataError(
-                "engine result is a playlist but does not say how many "
-                "Items it holds"
+                "engine result is a playlist but does not say how many Items it holds"
             )
         try:
             count = int(count_raw)
@@ -438,7 +432,4 @@ def render_summary(plans: Sequence[Plan]) -> str:
     if count == 0:
         return "Nothing was downloaded or written.\n"
     item_word = "Item" if count == 1 else "Items"
-    return (
-        f"Nothing was downloaded or written. "
-        f"{count} {item_word} planned.\n"
-    )
+    return f"Nothing was downloaded or written. {count} {item_word} planned.\n"

@@ -83,9 +83,7 @@ class Engine(Protocol):
 
 
 ResolverCallable = Callable[[str], dict[str, object]]
-ExecutorCallable = Callable[
-    [Plan, Callable[[dict[str, object]], None] | None], Path
-]
+ExecutorCallable = Callable[[Plan, Callable[[dict[str, object]], None] | None], Path]
 
 
 def normalise_resolver_result(info: object) -> dict[str, object]:
@@ -328,9 +326,9 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def default_progress_printer(stream: TextIO | None = None) -> Callable[
-    [dict[str, object]], None
-]:
+def default_progress_printer(
+    stream: TextIO | None = None,
+) -> Callable[[dict[str, object]], None]:
     """Return a progress hook that prints one line per yt-dlp event.
 
     The hook writes a short, single-line update for each progress event.

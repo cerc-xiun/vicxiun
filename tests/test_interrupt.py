@@ -261,9 +261,7 @@ def test_a_download_interrupt_does_not_touch_files_that_merely_look_like_partial
     # --no-skip: the Item's target is deliberately pre-placed (the
     # user's own copy), and the test interrupts the executor -- which
     # by default is never reached for a file that already exists.
-    code = main(
-        ["--folder", str(tmp_path), "--no-skip", "https://example.com/fin"]
-    )
+    code = main(["--folder", str(tmp_path), "--no-skip", "https://example.com/fin"])
 
     assert code == 130
     for survivor in survivors:
@@ -292,9 +290,7 @@ def test_a_download_interrupt_spares_an_older_file(tmp_path: Path, monkeypatch) 
     # --no-skip, for the same reason as the partial-looking-files test
     # above: the prior file must stay put while the executor is
     # interrupted, and the executor only runs when skipping is off.
-    code = main(
-        ["--folder", str(tmp_path), "--no-skip", "https://example.com/fin"]
-    )
+    code = main(["--folder", str(tmp_path), "--no-skip", "https://example.com/fin"])
 
     assert code == 130
     assert prior.exists()

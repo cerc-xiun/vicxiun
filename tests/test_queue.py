@@ -57,7 +57,8 @@ def test_several_links_in_one_command_are_processed_one_after_another(
         "https://example.com/c",
     ]
     install_resolver(
-        monkeypatch, {link: {**BASIC_DOWNLOAD, "video_id": f"id{link[-1]}"} for link in links}
+        monkeypatch,
+        {link: {**BASIC_DOWNLOAD, "video_id": f"id{link[-1]}"} for link in links},
     )
 
     ran: list[str] = []
@@ -259,7 +260,10 @@ def test_the_exit_code_reflects_the_mix_of_outcomes(
     links = [f"https://example.com/{chr(ord('a') + i)}" for i in range(total)]
     install_resolver(
         monkeypatch,
-        {link: {**BASIC_DOWNLOAD, "video_id": f"id{i}"} for i, link in enumerate(links)},
+        {
+            link: {**BASIC_DOWNLOAD, "video_id": f"id{i}"}
+            for i, link in enumerate(links)
+        },
     )
     failing = set(links[:failing_count])
 
