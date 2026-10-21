@@ -45,6 +45,7 @@ def _install_fake_resolver(monkeypatch, mapping):
     def resolver(url):
         if url not in mapping:
             from vicxiun.errors import UserError
+
             raise UserError(f"engine cannot resolve {url}")
         return dict(mapping[url])
 

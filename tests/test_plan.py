@@ -35,6 +35,7 @@ def PhoneSafeProfile() -> Profile:
     """Convenience: return the default 'phone-safe' profile for tests."""
     return profile_from_name("phone-safe")
 
+
 # ---------------------------------------------------------------------------
 # Fake metadata resolver
 # ---------------------------------------------------------------------------

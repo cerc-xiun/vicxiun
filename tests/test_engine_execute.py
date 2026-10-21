@@ -305,9 +305,7 @@ def test_translate_download_error_for_sign_in_required() -> None:
     from yt_dlp.utils import DownloadError
 
     with pytest.raises(RefusedContent):
-        _translate_download_error(
-            DownloadError("Sign in to confirm you are not a bot")
-        )
+        _translate_download_error(DownloadError("Sign in to confirm you are not a bot"))
 
 
 def test_translate_download_error_for_premium() -> None:

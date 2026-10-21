@@ -231,6 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
 def default_output_root() -> Path:
     """The platform's default output folder, with no per-user setup."""
     from vicxiun.platform import default_output_root as _default
+
     return _default()
 
 

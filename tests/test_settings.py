@@ -143,9 +143,7 @@ def test_saving_the_folder_is_remembered(capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_saved_profile_is_used_when_no_flag_is_given(
-    monkeypatch, capsys
-) -> None:
+def test_saved_profile_is_used_when_no_flag_is_given(monkeypatch, capsys) -> None:
     _install_fake_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
     assert main(["settings", "profile", "best"]) == 0
 
@@ -213,9 +211,7 @@ def test_a_folder_flag_does_not_persist(tmp_path, monkeypatch, capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_corrupt_json_is_ignored_with_a_clear_message(
-    monkeypatch, capsys
-) -> None:
+def test_corrupt_json_is_ignored_with_a_clear_message(monkeypatch, capsys) -> None:
     _install_fake_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
     _settings_file().write_text("{not json", encoding="utf-8")
 
