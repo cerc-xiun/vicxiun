@@ -88,6 +88,30 @@ ExecutorCallable = Callable[
 ]
 
 
+def normalise_resolver_result(info: object) -> dict[str, object]:
+    """Map yt-dlp's raw info dict onto vicxiun's metadata keys.
+
+    yt-dlp names the video's identifier ``id``; ``plan._to_metadata``
+    requires ``video_id``. Its raw dict also has no top-level
+    human-readable format description, so one is built from the selected
+    stream's ``resolution`` and ``ext`` -- the Plan prints it as the
+    ``Format`` line (display only). Anything the raw dict already
+    supplies is kept, so the resolver result still surfaces everything
+    yt-dlp reported.
+    """
+    if not isinstance(info, dict):
+        return {}
+    result = dict(info)
+    if not result.get("video_id"):
+        result["video_id"] = result.get("id") or ""
+    if not result.get("format_description"):
+        resolution = str(result.get("resolution") or "unknown")
+        ext = str(result.get("ext") or "")
+        suffix = f" {ext}" if ext else ""
+        result["format_description"] = f"{resolution}{suffix}"
+    return result
+
+
 class YtDlpEngine:
     """Default engine. Calls ``yt-dlp`` through its Python API."""
 
@@ -148,7 +172,10 @@ class YtDlpEngine:
             info = ydl.extract_info(url, download=False, process=True)
         # ``extract_info`` returns the processed info dict; we surface it
         # as a plain dict so tests are not coupled to yt-dlp internals.
-        return dict(info) if info is not None else {}
+        # yt-dlp's key names differ from vicxiun's metadata contract
+        # (``id`` vs ``video_id``, no ``format_description``), so they
+        # are normalised here rather than trusted downstream.
+        return normalise_resolver_result(info)
 
     @staticmethod
     def _default_executor(

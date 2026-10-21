@@ -8,7 +8,12 @@ to disable remote-component fetching.
 
 from __future__ import annotations
 
-from vicxiun.engine import Engine, YtDlpEngine, build_default_engine
+from vicxiun.engine import (
+    Engine,
+    YtDlpEngine,
+    build_default_engine,
+    normalise_resolver_result,
+)
 
 
 def test_engine_resolver_protocol_is_satisfied_by_callable() -> None:
@@ -70,3 +75,39 @@ def test_default_engine_disables_telemetry() -> None:
     # We assert no telemetry-opt-in flag is set positive.
     for key in ("enable_telemetry", "telemetry"):
         assert opts.get(key) in (None, False, "off")
+
+
+def test_resolver_result_maps_yt_dlp_keys_to_the_metadata_contract() -> None:
+    """A real yt-dlp info dict carries ``id``, not ``video_id``, and no
+    ``format_description``. ``normalise_resolver_result`` maps both onto
+    the metadata contract ``plan._to_metadata`` enforces, so a real link
+    resolves instead of failing with "engine result missing keys"."""
+    raw = {
+        "id": "aqz-KE-bpKQ",
+        "title": "t",
+        "uploader": "u",
+        "ext": "mp4",
+        "is_live": False,
+        "resolution": "1920x1080",
+    }
+    result = normalise_resolver_result(raw)
+    assert result["video_id"] == "aqz-KE-bpKQ"
+    assert result["format_description"] == "1920x1080 mp4"
+    # Everything yt-dlp reported is still surfaced through.
+    assert result["id"] == "aqz-KE-bpKQ"
+
+
+def test_resolver_result_keeps_explicit_video_id_and_format_description() -> None:
+    raw = {
+        "id": "x",
+        "video_id": "explicit",
+        "title": "t",
+        "format_description": "already described",
+    }
+    result = normalise_resolver_result(raw)
+    assert result["video_id"] == "explicit"
+    assert result["format_description"] == "already described"
+
+
+def test_resolver_result_of_none_is_an_empty_dict() -> None:
+    assert normalise_resolver_result(None) == {}

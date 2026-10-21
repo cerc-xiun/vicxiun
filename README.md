@@ -107,12 +107,74 @@ every pull request.
 
 ## Installing it
 
+The package is not on PyPI yet (that is tracked in the issue tracker), so
+`uv tool install` and `pip install` will fail until it is.
+
 Once the package is published to PyPI:
 
 ```console
 uv tool install vicxiun     # PC
 pip install vicxiun         # Android, inside Termux
 ```
+
+Two different commands, and not a preference: `uv` has no Android build,
+so `pip` inside Termux is the only option there
+([ADR-0008](docs/adr/0008-uv-on-pc-pip-on-android.md)). The full Android
+walkthrough — Termux, shared storage, wake locks and battery optimisation —
+is in [docs/android.md](docs/android.md).
+
+## Main commands
+
+```console
+vicxiun <link> ...                          # download / capture, in order
+vicxiun --dry-run <link> ...                # print the Plan, write nothing
+vicxiun --profile {audio,best,capture,phone-safe} <link>
+vicxiun --folder <path> <link>              # override where files land
+vicxiun --wait-for-stream <link>            # record a scheduled stream from its start
+vicxiun --from-file links.txt               # one link per line; blank lines / '#' ignored
+vicxiun --no-skip <link> ...                # re-run even if the file or skip record exists
+vicxiun --playlist-limit 0 <link>           # never ask before a huge playlist
+vicxiun settings                            # show every saved setting
+vicxiun settings profile best               # save a value
+```
+
+`vicxiun --help` shows everything, including the defaults. Choices made
+once are remembered under `vicxiun settings`; a flag on a run overrides a
+saved value and is never saved.
+
+## Why captures are MKV, not MP4
+
+A Capture (a live stream) records to MKV; a Download writes MP4. A live
+stream cannot be resumed, and an interrupted MP4 frequently will not open —
+while MKV survives being cut off mid-way, so a capture stopped deliberately
+or by Android still leaves a playable file
+([ADR-0007](docs/adr/0007-captures-record-to-mkv.md)). Remuxing a finished
+capture to MP4 is set aside for a later version.
+
+## Known limitations
+
+Stated plainly, so nobody finds them by surprise:
+
+- **iOS is not supported.** Getting a real terminal and a real Python on
+  iOS without a Mac and a developer account is not currently possible, so
+  there is no honest install path to document. Android is supported
+  because Termux provides exactly that
+  ([ADR-0006](docs/adr/0006-termux-is-the-android-path.md)).
+- **DRM and paywalled content is refused, permanently.** A feature, not a
+  gap — see the statement at the top of this file.
+- **A playlist currently writes all its entries to one file** — each entry
+  overwrites the previous one, and only the last entry survives (the
+  confirmation question exists to guard the disk; per-entry naming is
+  tracked as [#23](https://github.com/cerc-xiun/vicxiun/issues/23)).
+- **Windows cleanup after an interrupt is best-effort** — a `.part` file
+  can remain if yt-dlp still holds it open; the next run finishes or skips
+  the Item, so nothing is lost.
+- **Android may kill a long capture** even with a wake lock and battery
+  optimisation off; the MKV container is the safety net.
+- **The Android instructions are unverified on a real device yet.** The
+  settings file inside Termux's private home and captures landing on
+  `/sdcard/Movies/vicxiun` are standard setups, but the real-device smoke
+  test is tracked in the issue tracker.
 
 ## Licence
 
