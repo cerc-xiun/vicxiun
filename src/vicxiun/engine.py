@@ -27,6 +27,7 @@ from vicxiun.errors import (
     RefusedContent,
     UserError,
 )
+from vicxiun.paths import entry_target
 from vicxiun.plan import CaptureKind, Plan
 
 # Recognise DRM / paywall phrases yt-dlp surfaces in its error messages.
@@ -188,6 +189,9 @@ class YtDlpEngine:
         """
         from yt_dlp import YoutubeDL
 
+        if plan.playlist_count > 0:
+            return _download_playlist(plan, on_progress)
+
         options = _build_executor_options(plan, on_progress)
 
         with YoutubeDL(options) as ydl:
@@ -201,6 +205,71 @@ class YtDlpEngine:
 def build_default_engine() -> YtDlpEngine:
     """Return the engine the real run uses."""
     return YtDlpEngine()
+
+
+def _download_playlist(
+    plan: Plan,
+    on_progress: Callable[[dict[str, object]], None] | None,
+) -> Path:
+    """Download a Playlist one entry at a time (ticket #23).
+
+    The Plan's ``target_path`` is the Playlist's output folder. yt-dlp's
+    own output templates are deliberately not used to name the entries:
+    a template lets yt-dlp choose the filename, which bypasses
+    vicxiun's hostile-title sanitisation (spec rule 43). Instead the
+    Playlist is resolved flat (the same cheap count-only extraction the
+    resolver uses, ticket #15) and each entry is downloaded on its own
+    with a fully literal ``outtmpl`` -- the absolute path ``entry_target``
+    built through the same sanitiser, traversal neutralisation and
+    containment assertion a single video's Plan gets.
+
+    One yt-dlp call per entry means an entry that is already on disk is
+    skipped by yt-dlp itself, so a re-run after a mid-Playlist failure
+    fetches only what is missing. The function returns the folder; each
+    finished entry is a complete file inside it.
+
+    A ``DownloadError`` from any entry propagates: ``execute()`` maps
+    it to a named error and the Queue treats the Item as failed, while
+    the entries that finished stay on disk.
+    """
+    from yt_dlp import YoutubeDL
+
+    folder = plan.target_path
+    resolve_options = _safe_default_options()
+    resolve_options["quiet"] = True
+    resolve_options["no_warnings"] = True
+    # Flat extraction: the entries' own metadata is fetched one video at
+    # a time below; here only the Playlist's shape is needed.
+    resolve_options["extract_flat"] = "in_playlist"
+    with YoutubeDL(resolve_options) as ydl:
+        info = ydl.extract_info(plan.url, download=False, process=True) or {}
+    entries = info.get("entries") or []
+
+    options = _build_executor_options(plan, on_progress)
+    for position, entry in enumerate(entries, start=1):
+        if entry is None:
+            # yt-dlp marks an entry it could not even resolve as None
+            # (a deleted video, say). Skip it, as a plain yt-dlp
+            # Playlist run would.
+            print(
+                f"  skipping entry {position}: the platform reports it unavailable",
+                file=sys.stderr,
+            )
+            continue
+        raw = entry if isinstance(entry, dict) else {}
+        entry_url = str(raw.get("url") or "")
+        if not entry_url:
+            raise UserError(f"playlist entry {position} has no link to download")
+        target = entry_target(
+            folder,
+            title=str(raw.get("title") or ""),
+            video_id=str(raw.get("id") or ""),
+            ext=plan.profile.container,
+        )
+        entry_options = {**options, "outtmpl": str(target)}
+        with YoutubeDL(entry_options) as ydl:
+            ydl.download([entry_url])
+    return folder
 
 
 def _safe_default_options() -> dict[str, object]:

@@ -409,6 +409,12 @@ def resolve_plan(
         video_id=metadata.video_id,
         ext=ext,
     )
+    if metadata.playlist_count:
+        # A Playlist's target is its output folder (ticket #23): the
+        # executor puts one sanitised file per entry inside it. The
+        # folder is the same name a single video of this link would
+        # take, minus the extension.
+        target_path = target_path.with_suffix("")
 
     return Plan(
         url=safe_url,

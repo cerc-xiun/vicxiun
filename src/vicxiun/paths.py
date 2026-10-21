@@ -139,6 +139,48 @@ def _is_rooted(segment: str) -> bool:
     return pure.is_absolute() or any(part == ".." for part in pure.parts)
 
 
+def _safe_id(video_id: str) -> str:
+    """Reduce a video id to the characters a filename segment may hold."""
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", video_id) or "id"
+    return safe_id[:_MAX_SEGMENT].rstrip(_REPLACEMENT)
+
+
+def entry_target(
+    folder: str | os.PathLike[str],
+    title: str,
+    video_id: str,
+    ext: str,
+) -> Path:
+    """Build the absolute target path for one entry of a Playlist.
+
+    Layout (ticket #23): a Playlist's entries land as one file each inside
+    the Playlist's own folder, ``<folder>/<Title> [id].<ext>``. The entry
+    names go through the same sanitisation and traversal neutralisation
+    as ``resolve_target`` -- a hostile entry title can never escape the
+    Playlist folder -- and containment is asserted here independently,
+    mirroring ``resolve_target``'s defence-in-depth.
+    """
+    root = Path(os.fspath(folder)).resolve()
+
+    if _is_rooted(title or ""):
+        title_segment = "untitled"
+    else:
+        title_segment = _safe_component(title or "")
+
+    base = f"{title_segment} [{_safe_id(video_id)}]"
+    safe_ext = re.sub(r"[^A-Za-z0-9]", "", ext.lower()) or "mp4"
+    candidate_path = (root / f"{base}.{safe_ext}").resolve()
+
+    try:
+        candidate_path.relative_to(root)
+    except ValueError as exc:
+        raise PathError(
+            f"target {candidate_path} escaped playlist folder {root}"
+        ) from exc
+
+    return candidate_path
+
+
 def resolve_target(
     output_root: str | os.PathLike[str],
     uploader: str,
@@ -177,10 +219,7 @@ def resolve_target(
     else:
         title_segment = _safe_component(raw_title)
 
-    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", video_id) or "id"
-    safe_id = safe_id[:_MAX_SEGMENT].rstrip(_REPLACEMENT)
-
-    base = f"{title_segment} [{safe_id}]"
+    base = f"{title_segment} [{_safe_id(video_id)}]"
     safe_ext = re.sub(r"[^A-Za-z0-9]", "", ext.lower()) or "mp4"
     name = f"{base}.{safe_ext}"
 

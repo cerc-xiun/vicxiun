@@ -19,6 +19,7 @@ import pytest
 from vicxiun.paths import (
     UNKNOWN_UPLOADER,
     PathError,
+    entry_target,
     resolve_target,
     sanitize_filename,
 )
@@ -318,3 +319,84 @@ def test_resolve_target_uses_unknown_when_uploader_sanitises_empty(
 def test_path_error_is_a_distinct_type() -> None:
     err = PathError("nope")
     assert isinstance(err, Exception)
+
+
+# ---------------------------------------------------------------------------
+# Layer 3: entry_target() -- one file per entry inside a Playlist's folder
+# (ticket #23)
+# ---------------------------------------------------------------------------
+
+
+def test_entry_target_places_the_entry_inside_the_playlist_folder(
+    tmp_path,
+) -> None:
+    folder = tmp_path / "Some Channel" / "A Big Mix [pl123]"
+    target = entry_target(folder, "Entry One", "e1", "mp4")
+    assert target.parent == folder.resolve()
+    assert target.name == "Entry One [e1].mp4"
+
+
+def test_entry_target_sanitises_a_hostile_entry_title(tmp_path) -> None:
+    folder = tmp_path / "mix"
+    target = entry_target(folder, 'a<b>:"c/\\|d?*e', "e1", "mp4")
+    assert target.parent == folder.resolve()
+    # No Windows-illegal character survives, as with resolve_target.
+    assert not any(c in target.name for c in '<>:"/\\|?*')
+
+
+def test_entry_target_is_contained_for_a_traversal_title(tmp_path) -> None:
+    folder = tmp_path / "mix"
+    target = entry_target(folder, "../../etc/passwd", "e1", "mp4")
+    assert target.resolve().is_relative_to(folder.resolve())
+
+
+def test_entry_target_is_contained_for_backslash_traversal(tmp_path) -> None:
+    folder = tmp_path / "mix"
+    target = entry_target(folder, "..\\..\\Windows", "e1", "mp4")
+    assert target.resolve().is_relative_to(folder.resolve())
+
+
+def test_entry_target_is_contained_for_absolute_and_drive_titles(
+    tmp_path,
+) -> None:
+    folder = tmp_path / "mix"
+    for hostile in ("/etc/passwd", "C:\\Windows\\System32", "..", ".", ""):
+        target = entry_target(folder, hostile, "e1", "mp4")
+        assert target.resolve().is_relative_to(folder.resolve()), hostile
+
+
+def test_entry_target_cleans_a_hostile_video_id(tmp_path) -> None:
+    """The id is reduced to letters, digits, ``-`` and ``_`` -- the same
+    rule ``resolve_target`` applies -- so it cannot carry a separator."""
+    folder = tmp_path / "mix"
+    target = entry_target(folder, "Entry", "../..//evil", "mp4")
+    stem = target.stem.split("[", 1)[1].rstrip("]")
+    assert "/" not in stem and "\\" not in stem and ".." not in stem
+    assert target.name.startswith("Entry [")
+    assert target.resolve().is_relative_to(folder.resolve())
+
+
+def test_entry_target_defaults_the_extension_when_empty(tmp_path) -> None:
+    folder = tmp_path / "mix"
+    target = entry_target(folder, "Entry", "e1", "")
+    assert target.name == "Entry [e1].mp4"
+
+
+def test_entry_target_two_entries_never_share_a_path(tmp_path) -> None:
+    folder = tmp_path / "mix"
+    a = entry_target(folder, "Same Title", "eAAA", "mp4")
+    b = entry_target(folder, "Same Title", "eBBB", "mp4")
+    assert a != b
+
+
+def test_entry_target_contains_path_independently_of_sanitisation(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same redundant defence as ``resolve_target``'s: containment
+    holds even with the sanitiser replaced by the identity."""
+    import vicxiun.paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "sanitize_filename", lambda s: s)
+    folder = tmp_path / "mix"
+    target = paths_mod.entry_target(folder, "../../etc/passwd", "e1", "mp4")
+    assert target.resolve().is_relative_to(folder.resolve())

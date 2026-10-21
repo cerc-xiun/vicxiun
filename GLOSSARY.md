@@ -21,7 +21,8 @@ _Avoid_: entry, request, task, video
 **Playlist**:
 A link that resolves to many videos at once. Not the Queue — the Queue is
 the tool's own sequential handling of the links you typed. The tool asks
-before handling a Playlist above the playlist limit.
+before handling a Playlist above the playlist limit. A Playlist's videos
+land in one folder of their own, one file per video (ticket #23).
 _Avoid_: channel, mix, collection
 
 **Download**:

@@ -36,6 +36,8 @@ import pytest
 from _fakes import (
     BASIC_DOWNLOAD,
     BASIC_LIVE,
+    BASIC_PLAYLIST,
+    install_confirm,
     install_executor,
     install_resolver,
 )
@@ -295,6 +297,40 @@ def test_a_download_interrupt_spares_an_older_file(tmp_path: Path, monkeypatch) 
     assert code == 130
     assert prior.exists()
     assert prior.read_bytes() == b"COMPLETE FILE FROM EARLIER"
+
+
+def test_a_playlist_interrupt_cleans_partials_inside_the_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A Playlist's interrupt aftermath (ticket #23): the target is the
+    Playlist's folder, so the in-flight entry's partial artifacts live
+    inside it and are removed from there -- while the entries that
+    already finished, complete files, stay (the completed-Items
+    guarantee, applied per entry).
+    """
+    install_resolver(
+        monkeypatch,
+        {"https://example.com/mix": BASIC_PLAYLIST},
+    )
+    install_confirm(monkeypatch, lambda count: True)
+
+    def executor(plan, progress):
+        folder = plan.target_path
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "Entry One [e1].mp4").write_bytes(b"COMPLETE ENTRY")
+        (folder / "Entry Two [e2].mp4.part").write_bytes(b"partial")
+        (folder / "Entry Two [e2].mp4.ytdl").write_bytes(b"partial")
+        raise KeyboardInterrupt("simulated Ctrl-C")
+
+    install_executor(monkeypatch, executor)
+
+    code = main(["--folder", str(tmp_path), "https://example.com/mix"])
+
+    folder = tmp_path / "Some Channel" / "A Big Mix [pl123]"
+    assert code == 130
+    assert (folder / "Entry One [e1].mp4").read_bytes() == b"COMPLETE ENTRY"
+    assert not (folder / "Entry Two [e2].mp4.part").exists()
+    assert not (folder / "Entry Two [e2].mp4.ytdl").exists()
 
 
 # ---------------------------------------------------------------------------

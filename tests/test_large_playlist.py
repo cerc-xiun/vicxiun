@@ -38,9 +38,18 @@ def _playlist(count: int) -> dict[str, object]:
 
 
 def _writing_executor(plan, progress):
-    """A fake executor that writes the file the Plan promised."""
-    plan.target_path.parent.mkdir(parents=True, exist_ok=True)
-    plan.target_path.write_bytes(b"x")
+    """A fake executor that writes what the Plan promised.
+
+    A playlist Plan's target is its output folder (ticket #23): the
+    fake drops one entry file inside, the way the real executor's
+    per-entry downloads would land.
+    """
+    if plan.playlist_count:
+        plan.target_path.mkdir(parents=True, exist_ok=True)
+        (plan.target_path / "Entry One [e1].mp4").write_bytes(b"x")
+    else:
+        plan.target_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.target_path.write_bytes(b"x")
     return plan.target_path
 
 
@@ -78,8 +87,11 @@ def test_a_playlist_above_the_limit_asks_and_states_the_count(
     assert asked == [60]
     # The prompt states how many Items were found.
     assert "This playlist holds 60 Items" in captured.err
-    # Confirming means the Item is handled for real.
-    assert (tmp_path / "Some Channel" / "A Big Mix [pl123].mp4").is_file()
+    # Confirming means the Item is handled for real: one folder, one
+    # file per entry (ticket #23).
+    playlist_folder = tmp_path / "Some Channel" / "A Big Mix [pl123]"
+    assert playlist_folder.is_dir()
+    assert (playlist_folder / "Entry One [e1].mp4").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +165,9 @@ def test_the_limit_is_overridable_by_a_flag(
     assert code == 0, capsys.readouterr().err
     assert bool(asked) is should_ask
     if not should_ask:
-        assert (tmp_path / "Some Channel" / "A Big Mix [pl123].mp4").is_file()
+        playlist_folder = tmp_path / "Some Channel" / "A Big Mix [pl123]"
+        assert playlist_folder.is_dir()
+        assert (playlist_folder / "Entry One [e1].mp4").is_file()
 
 
 def test_a_negative_limit_is_a_user_error(
@@ -193,7 +207,9 @@ def test_a_playlist_at_or_below_the_limit_never_asks(
     code = main(["--folder", str(tmp_path), LINK])
 
     assert code == 0, capsys.readouterr().err
-    assert (tmp_path / "Some Channel" / "A Big Mix [pl123].mp4").is_file()
+    playlist_folder = tmp_path / "Some Channel" / "A Big Mix [pl123]"
+    assert playlist_folder.is_dir()
+    assert (playlist_folder / "Entry One [e1].mp4").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -334,4 +350,6 @@ def test_a_playlist_without_an_uploader_lands_in_the_fallback_group(
 
     captured = capsys.readouterr()
     assert code == 0, captured.err
-    assert (tmp_path / "_unknown" / "A Big Mix [pl123].mp4").is_file()
+    playlist_folder = tmp_path / "_unknown" / "A Big Mix [pl123]"
+    assert playlist_folder.is_dir()
+    assert (playlist_folder / "Entry One [e1].mp4").is_file()

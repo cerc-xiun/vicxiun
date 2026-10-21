@@ -96,22 +96,40 @@ def collect_captured(target: Path) -> Path | None:
 def remove_partial_download(target: Path, preexisting: bool) -> None:
     """Erase the remnants of an interrupted Download.
 
-    Deletes every partial artifact. The final file is deleted only
-    when the file did not exist when this Item began: then it is this
-    Item's own work -- a merge the interrupt cut short, which no
-    player opens. ``preexisting`` is decided by a plain existence
-    check taken before the Item ran, not by timestamps: a filesystem
-    write timestamp can trail the wall clock by microseconds, which
-    makes "written during this Item" undecidable from two adjacent
-    writes. A final file that existed before is left alone -- a
-    completed Item's file is guaranteed intact (ticket #13) -- and the
-    one known limit is the copy a re-run of the SAME link already had
-    completed before this Job began, where an interrupted merge lands
-    after ffmpeg has truncated the old copy: the wreckage is left in
-    place, and re-running finishes the job. Deletion is per-file
-    best-effort: on Windows yt-dlp can still hold an open handle when
-    the interrupt arrives, and one busy file must not stop the rest.
+    For a single video, ``target`` is the file itself: every partial
+    artifact beside it is deleted, and the final file is deleted only
+    when it did not exist when this Item began -- then it is this
+    Item's own work, a merge the interrupt cut short, which no player
+    opens. ``preexisting`` is decided by a plain existence check taken
+    before the Item ran, not by timestamps: a filesystem write
+    timestamp can trail the wall clock by microseconds, which makes
+    "written during this Item" undecidable from two adjacent writes. A
+    final file that existed before is left alone -- a completed Item's
+    file is guaranteed intact (ticket #13) -- and the one known limit
+    is the copy a re-run of the SAME link already had completed before
+    this Job began, where an interrupted merge lands after ffmpeg has
+    truncated the old copy: the wreckage is left in place, and
+    re-running finishes the job.
+
+    For a Playlist (ticket #23) ``target`` is the Playlist's folder:
+    the partial artifacts of the entry in flight live inside it. They
+    are deleted the same way; the finished entries -- complete files --
+    stay, which is the completed-Items guarantee applied per entry.
+    Deletion is per-file best-effort: on Windows yt-dlp can still hold
+    an open handle when the interrupt arrives, and one busy file must
+    not stop the rest.
     """
+    if target.is_dir():
+        for artifact in target.iterdir():
+            if not _ARTIFACT_RE.search(artifact.name):
+                continue
+            try:
+                artifact.unlink(missing_ok=True)
+            except OSError:
+                # Still held by a dying yt-dlp (Windows). Next run
+                # cleans it: nothing here is worth recovering.
+                pass
+        return
     for artifact in partial_artifacts(target):
         try:
             artifact.unlink(missing_ok=True)

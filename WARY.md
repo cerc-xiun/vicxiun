@@ -143,6 +143,8 @@ settings file location inside Termux's private home is standard but
   yt-dlp's own output templates: that bypasses vicxiun's hostile-title
   sanitisation (security surface, spec rule 43).
   **Ticket #23 created for this** while working on #18.
+  **Resolved by #23**: a playlist now lands in its own folder, one
+  sanitised file per entry, and the README limitation is gone.
 
 ## From #18 (README + Android docs)
 
@@ -168,6 +170,39 @@ settings file location inside Termux's private home is standard but
   pages.
 - Ticket #23 (playlist one-file-per-entry) was created while working
   on #18; the WARY entry in "From #15" records it.
+
+## From #23 (Playlist: one file per entry)
+
+- A playlist Plan's `target_path` is now the playlist's output FOLDER
+  (`resolve_target(...).with_suffix("")`): `<output>/<Uploader>/<Playlist
+  title> [playlist id]/`. The executor (`vicxiun.engine._download_playlist`)
+  resolves the playlist flat (same extraction as the #15 count) and then
+  makes one yt-dlp call PER ENTRY with a fully literal absolute `outtmpl`
+  built by the new pure `vicxiun.paths.entry_target` -- so every filename
+  goes through the same sanitiser, traversal neutralisation and
+  containment assertion as a single video (spec rule 43 intact; tested in
+  `tests/test_engine_playlist.py`, including the "no template fields in
+  outtmpl" pin). yt-dlp's own output templates remain forbidden.
+- Why one yt-dlp call per entry and not yt-dlp's own playlist download:
+  yt-dlp's `outtmpl` accepts strings only (`YoutubeDL._prepare_filename`
+  calls `.replace()` on the value -- no callable support as of yt-dlp
+  2026.08.19), and per-entry naming through templates would hand
+  filenames to yt-dlp. The cost is one flat playlist fetch per run, on
+  top of one fetch per entry -- the same total a plain yt-dlp playlist
+  run does anyway.
+- Consequences worth knowing: a re-run after a mid-playlist failure is
+  incremental (yt-dlp itself skips an entry whose final file exists --
+  do not add vicxiun-side per-entry skipping on top of it); the file-
+  presence skip check (`plan.target_path.is_file()`) is naturally False
+  for a folder, so playlists are only ever skipped via the skip record;
+  an entry the platform reports unavailable (a `None` entry) is skipped
+  with a stderr line, and an entry with no link at all fails the Item
+  (named UserError). `remove_partial_download` now also cleans partial
+  artifacts INSIDE a directory target, leaving finished entries intact.
+- NOT yet verified on a real playlist: the whole flow ran through the
+  fake seam only. A real-run spot check (`--dry-run` on a playlist shows
+  the folder; a small real playlist shows one file per video) is worth
+  one line in the manual checklist if playlist use becomes real.
 
 ## From #12 (Disk-space protection)
 
