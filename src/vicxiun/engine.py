@@ -349,6 +349,11 @@ def _build_executor_options(
     """
     options = _safe_default_options()
     options["quiet"] = True
+    # yt-dlp picks its progress printer from ``noprogress``, not from
+    # ``quiet``, so ``quiet`` alone still draws a bar. Hooks fire either
+    # way (the progress printer and the disk-space guard both ride them):
+    # this only stops yt-dlp writing a second, duplicate progress line.
+    options["noprogress"] = True
     options["no_warnings"] = True
     options["format"] = plan.profile.format_selector
     # The Profile's sort is what expresses its codec and resolution

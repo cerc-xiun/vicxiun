@@ -221,6 +221,10 @@ def test_playlist_download_carries_the_progress_hook(tmp_path: Path) -> None:
 
     (ydl,) = [y for y in FakeYoutubeDL.created if y.downloaded]
     assert ydl.options["progress_hooks"] == [hook]
+    # Per-entry options come from ``_build_executor_options`` too, so the
+    # duplicate progress bar is silenced inside a Playlist as well
+    # (ticket #30).
+    assert ydl.options["noprogress"] is True
 
 
 def test_playlist_download_maps_an_entry_error_like_a_single_video(
