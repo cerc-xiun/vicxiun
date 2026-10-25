@@ -397,6 +397,12 @@ def run_item(
     except (InvalidLinkError, UserError) as exc:
         print(str(exc), file=sys.stderr)
         return ItemResult(link=link, path=None, error=exc)
+    except Exception as exc:  # noqa: BLE001 - boundary, mapped to 5
+        # A resolve failure the engine could not name (ticket #29): the
+        # Item fails like any other, and the Queue continues.
+        result = ItemResult(link=link, path=None, error=_classify_failure(exc))
+        _record_failure(result)
+        return result
 
     if skip_existing and plan.target_path.is_file():
         print(
