@@ -8,11 +8,25 @@ to disable remote-component fetching.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+from yt_dlp.utils import DownloadError
+
 from vicxiun.engine import (
     Engine,
     YtDlpEngine,
+    _build_executor_options,
     build_default_engine,
     normalise_resolver_result,
+)
+from vicxiun.errors import UserError
+from vicxiun.plan import (
+    CaptureKind,
+    DownloadKind,
+    Plan,
+    profile_from_name,
+    resolve_plan,
 )
 
 
@@ -111,3 +125,103 @@ def test_resolver_result_keeps_explicit_video_id_and_format_description() -> Non
 
 def test_resolver_result_of_none_is_an_empty_dict() -> None:
     assert normalise_resolver_result(None) == {}
+
+
+# ---------------------------------------------------------------------------
+# Upcoming streams -- ticket #28
+# ---------------------------------------------------------------------------
+
+
+def test_engine_resolve_metadata_translates_a_yt_dlp_error() -> None:
+    """A resolve-time ``DownloadError`` becomes a named vicxiun error.
+
+    The real failure (ticket #28): an upcoming stream made yt-dlp raise
+    "This live event will begin in 27 hours" straight through
+    ``resolve_metadata``, which escaped as a raw traceback.
+    """
+
+    def raising(url: str) -> dict[str, object]:
+        raise DownloadError(
+            "[youtube] NcnmGiJSpbA: This live event will begin in 27 hours."
+        )
+
+    engine = YtDlpEngine(resolver=raising)
+    with pytest.raises(UserError) as excinfo:
+        engine.resolve_metadata("https://www.youtube.com/live/NcnmGiJSpbA")
+    assert "will begin in 27 hours" in str(excinfo.value)
+
+
+def test_resolver_ignores_no_formats_error_while_the_executor_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ignore_no_formats_error`` is set for the resolver only (ticket #28).
+
+    A scheduled stream has no formats, and yt-dlp treats that as an
+    expected error -- so the resolver must ignore it. The executor builds
+    its options from the shared ``_safe_default_options``, which must NOT
+    carry the flag: a link with no formats still fails at execute time.
+    """
+    captured: dict[str, object] = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, options: dict[str, object]) -> None:
+            captured.update(options)
+
+        def __enter__(self) -> FakeYoutubeDL:
+            return self
+
+        def __exit__(self, *exc_info: object) -> bool:
+            return False
+
+        def extract_info(
+            self, url: str, download: bool, process: bool
+        ) -> dict[str, object]:
+            return {"id": "x"}
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", FakeYoutubeDL)
+    engine = YtDlpEngine()
+    engine.resolve_metadata("https://example.com/v")
+
+    assert captured["ignore_no_formats_error"] is True
+    plan = Plan(
+        url="https://example.com/v",
+        kind=DownloadKind(),
+        profile=profile_from_name("phone-safe"),
+        format_description="MP4",
+        target_path=Path("/tmp/out/a.mp4"),
+    )
+    assert "ignore_no_formats_error" not in _build_executor_options(plan, None)
+
+
+def test_no_formats_upcoming_result_survives_normalisation_and_plans_a_wait(
+    tmp_path: Path,
+) -> None:
+    """A scheduled stream's raw info dict reaches the upcoming branch.
+
+    yt-dlp reports an upcoming event with no formats, so no ``ext`` and no
+    ``resolution``: exactly what normalisation used to drop, which made
+    ``plan.resolve_plan``'s ``is_upcoming`` branch unreachable against a
+    real event (ticket #28). This walks the real hand-off -- raw dict,
+    normalisation, plan -- without re-testing the Queue's wait loop.
+    """
+    raw: dict[str, object] = {
+        "id": "NcnmGiJSpbA",
+        "title": "Tonight's Stream",
+        "uploader": "Some Channel",
+        "is_live": False,
+        "live_status": "is_upcoming",
+        "formats": [],
+    }
+
+    plan = resolve_plan(
+        "https://www.youtube.com/live/NcnmGiJSpbA",
+        profile_from_name("capture"),
+        tmp_path,
+        lambda url: normalise_resolver_result(raw),
+        wait_for_stream=True,
+    )
+
+    assert isinstance(plan.kind, CaptureKind)
+    assert plan.wait_for_stream is True
+    assert plan.format_description == "unknown"
+    assert plan.target_path.suffix == ".mkv"
