@@ -280,6 +280,78 @@ def test_dry_run_returns_user_error_code_when_the_link_cannot_resolve(
 
 
 # ---------------------------------------------------------------------------
+# A rejected preview reads honestly (ticket #27)
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_wholly_rejected_states_the_rejection(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Nothing planned must not read like a clean preview."""
+    _install_fake_resolver(monkeypatch, {})
+
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            "https://ex.com/$(touch x)",
+            "file:///etc/passwd",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "Nothing was downloaded or written." in captured.out
+    assert "2 links rejected." in captured.out
+    assert "planned" not in captured.out
+
+
+def test_dry_run_mixed_preview_states_both_counts(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One planned Item and one rejection are both stated."""
+    _install_fake_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
+
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            "https://example.com/fin",
+            "file:///etc/passwd",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Nothing was downloaded or written." in captured.out
+    assert "1 Item planned." in captured.out
+    assert "1 link rejected." in captured.out
+
+
+@pytest.mark.parametrize(
+    ("bad", "named"),
+    [("https://ex.com/x\nid", "'\\n'"), ("https://ex.com/x\0id", "'\\x00'")],
+)
+def test_dry_run_names_the_unsafe_character_by_repr(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str], bad: str, named: str
+) -> None:
+    """A newline or NUL is named, never echoed raw into the terminal."""
+    _install_fake_resolver(monkeypatch, {})
+
+    code = main(["--dry-run", "--folder", str(tmp_path), bad])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert f"a link contains an unsafe character: {named}" in captured.err
+    # The refusal is one line: a raw newline (or NUL) in the message would
+    # add another one.
+    assert captured.err.count("\n") == 1
+    assert "\0" not in captured.err
+
+
+# ---------------------------------------------------------------------------
 # Unexpected failures keep the exit-code contract (ticket #24)
 # ---------------------------------------------------------------------------
 

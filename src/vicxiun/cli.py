@@ -401,7 +401,9 @@ def _run_dry_run(
 
     for plan in plans:
         print(plan.render(), end="")
-    print(render_summary(plans), end="")
+    # Every link that produced no Plan is named in the summary, so a preview
+    # that rejected everything cannot read like a clean preview (ticket #27).
+    print(render_summary(plans, rejected=len(failures)), end="")
 
     if failures and plans:
         return 1

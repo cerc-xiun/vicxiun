@@ -165,6 +165,32 @@ def test_resolve_plan_rejects_shell_metacharacters() -> None:
             )
 
 
+@pytest.mark.parametrize(
+    ("url", "named"),
+    [
+        ("https://ex.com/x\nid", ("'\\n'",)),
+        ("https://ex.com/x\0id", ("'\\x00'",)),
+        ("https://ex.com/$(x)|y", ("'$'", "'|'")),
+    ],
+)
+def test_resolve_plan_names_the_unsafe_characters_by_repr(
+    url: str, named: tuple[str, ...]
+) -> None:
+    """Each offending character is named via ``repr``, never raw (ticket #27)."""
+    with pytest.raises(InvalidLinkError) as excinfo:
+        resolve_plan(
+            url,
+            profile=PhoneSafeProfile(),
+            output_root=Path("/out"),
+            resolver=_FakeResolver({}),
+        )
+    message = str(excinfo.value)
+    for piece in named:
+        assert piece in message
+    assert "\0" not in message
+    assert "\n" not in message
+
+
 def test_resolve_plan_accepts_a_multi_parameter_url(tmp_path: Path) -> None:
     """A share link keeps every query parameter: accepted, never rewritten."""
     url = (
