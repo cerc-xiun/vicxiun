@@ -564,3 +564,22 @@ def test_plan_to_json_roundtrips() -> None:
     assert payload["url"] == "https://example.com/v"
     assert payload["kind"] == "Download"
     assert payload["profile"] == "phone-safe"
+    # A plain video: the human rendering prints no Playlist line, so the
+    # JSON carries a zero rather than omitting the field.
+    assert payload["playlist_count"] == 0
+    assert "Playlist :" not in plan.render()
+
+
+def test_plan_to_json_agrees_with_render_on_playlist_count() -> None:
+    """Both renderings of a Playlist Plan report the same count (ticket #25)."""
+    plan = Plan(
+        url="https://example.com/mix",
+        kind=DownloadKind(),
+        profile=PhoneSafeProfile(),
+        format_description="playlist of 7 Items",
+        target_path=Path("/out/Chan/A Big Mix [pl123]"),
+        playlist_count=7,
+    )
+    payload = json.loads(plan.to_json())
+    assert payload["playlist_count"] == 7
+    assert f"Playlist : {payload['playlist_count']} Items" in plan.render()

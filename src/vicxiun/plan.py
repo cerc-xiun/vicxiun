@@ -358,6 +358,9 @@ class Plan:
             "format_description": self.format_description,
             "target_path": str(self.target_path),
             "wait_for_stream": self.wait_for_stream,
+            # Present even for a plain video (0), so both renderings of the
+            # same Plan report the same count (ticket #25).
+            "playlist_count": self.playlist_count,
         }
         return json.dumps(payload, indent=2, sort_keys=True)
 
