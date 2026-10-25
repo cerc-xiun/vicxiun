@@ -47,6 +47,19 @@ finished, so re-running the same Queue skips them instead of fetching them
 again. It is not a history: it holds only what is done, one link per line.
 _Avoid_: history, log, archive, cache
 
+**Rejected link**:
+A link turned away during validation, before any metadata request: a non-http
+scheme, a shell metacharacter, or a value that cannot be a link. Nothing is
+attempted. A DRM or paywalled link is not rejected; it is refused after it
+resolves.
+_Avoid_: failed, refused
+
+**Refusal**:
+The deliberate no to DRM-protected or paywalled content after the link
+resolves. Exit code 4. It is not a rejection; the Item is still counted as
+failed.
+_Avoid_: rejection, error
+
 ### What you ask for
 
 **Profile**:

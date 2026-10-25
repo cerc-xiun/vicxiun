@@ -16,7 +16,13 @@ from pathlib import Path
 
 from vicxiun import __version__
 from vicxiun.engine import build_default_engine
-from vicxiun.errors import UserError
+from vicxiun.errors import (
+    PrerequisiteMissing,
+    RefusedContent,
+    UnexpectedFailure,
+    UserError,
+    exit_code_for,
+)
 from vicxiun.plan import (
     InvalidLinkError,
     Plan,
@@ -369,6 +375,11 @@ def _run_dry_run(
     does not apply here: a preview resolves and prints every link, and
     the no-write guarantee means it never reads or writes the skip
     record.
+
+    Exit codes follow the same contract as a real run (ticket #24):
+    a partly planned Job is 1, a wholly rejected Job is 2, a refused
+    link is 4, a missing Prerequisite is 3, and a Job that planned
+    nothing because something unexpected was raised is 5.
     """
     plans: list[Plan] = []
     failures: list[tuple[str, BaseException]] = []
@@ -381,20 +392,47 @@ def _run_dry_run(
                 _resolve_metadata,
                 wait_for_stream=args.wait_for_stream,
             )
-        except (InvalidLinkError, UserError) as exc:
+        except (
+            InvalidLinkError,
+            UserError,
+            RefusedContent,
+            PrerequisiteMissing,
+        ) as exc:
             failures.append((link, exc))
             print(str(exc), file=sys.stderr)
+            continue
+        except Exception as exc:
+            # A surprise must not escape as a traceback: name it the way
+            # the Queue names one, and count it for the exit code.
+            # ``KeyboardInterrupt`` is a BaseException, so Ctrl+C still
+            # interrupts the preview instead of being recorded here.
+            error = UnexpectedFailure(str(exc))
+            failures.append((link, error))
+            print(f"{link}: unexpected ({error})", file=sys.stderr)
             continue
         plans.append(plan)
 
     for plan in plans:
         print(plan.render(), end="")
-    print(render_summary(plans), end="")
+    # Every link that produced no Plan is counted in the summary, so a
+    # preview that rejected everything cannot read like a clean preview
+    # (ticket #27). Refusals and Prerequisite failures are not rejections;
+    # they get their own count (ticket #34).
+    rejected = sum(1 for _, error in failures if isinstance(error, InvalidLinkError))
+    print(
+        render_summary(plans, rejected=rejected, failed=len(failures) - rejected),
+        end="",
+    )
 
     if failures and plans:
         return 1
     if failures:
-        return 2
+        # A surprise is an unexpected failure (ticket #24); anything named
+        # keeps its real-run code -- user error 2, missing Prerequisite 3,
+        # refused content 4 (ticket #34).
+        if any(isinstance(error, UnexpectedFailure) for _, error in failures):
+            return 5
+        return exit_code_for(failures[0][1])
     return 0
 
 

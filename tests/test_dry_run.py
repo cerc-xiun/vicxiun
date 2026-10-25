@@ -23,6 +23,7 @@ import pytest
 
 from vicxiun import cli
 from vicxiun.cli import main
+from vicxiun.errors import PrerequisiteMissing, RefusedContent
 
 # ---------------------------------------------------------------------------
 # Test fixtures
@@ -225,6 +226,30 @@ def test_dry_run_exits_zero_for_a_single_valid_link(tmp_path, monkeypatch) -> No
     assert code == 0
 
 
+def test_dry_run_accepts_a_multi_parameter_link_unchanged(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ticket #26: ``&`` is URL data, so every query parameter survives."""
+    link = (
+        "https://www.youtube.com/watch?v=hsLiJP2rqS8"
+        "&list=RDGMEMQ1dJ7wXfLlqCJ7yduJHqQ&index=2&t=42s&si=AbCdEf123"
+    )
+    calls: list[str] = []
+
+    def resolver(url):
+        calls.append(url)
+        return dict(_BASIC_DOWNLOAD)
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+    code = main(["--dry-run", "--folder", str(tmp_path), link])
+
+    assert code == 0
+    assert calls == [link]
+    assert link in capsys.readouterr().out
+
+
 def test_dry_run_returns_partial_when_some_links_fail(tmp_path, monkeypatch) -> None:
     """One link bad, one link fine -> partial-success exit code.
 
@@ -245,18 +270,184 @@ def test_dry_run_returns_partial_when_some_links_fail(tmp_path, monkeypatch) -> 
     assert code == 1
 
 
-def test_dry_run_returns_nonzero_when_the_link_cannot_resolve(
+def test_dry_run_returns_user_error_code_when_the_link_cannot_resolve(
+    tmp_path, monkeypatch
+) -> None:
+    """An unresolvable link is a named user error: nothing planned, exit 2."""
+    _install_fake_resolver(monkeypatch, {})
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+    assert code == 2
+
+
+# ---------------------------------------------------------------------------
+# A rejected preview reads honestly (ticket #27)
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_wholly_rejected_states_the_rejection(
     tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """An unresolvable link yields a user-error code."""
-    from vicxiun.errors import UserError
+    """Nothing planned must not read like a clean preview."""
+    _install_fake_resolver(monkeypatch, {})
 
-    def raising(url):
-        raise UserError(f"engine cannot resolve {url}")
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            "https://ex.com/$(touch x)",
+            "file:///etc/passwd",
+        ]
+    )
 
-    monkeypatch.setattr(cli, "_resolver", raising)
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "Nothing was downloaded or written." in captured.out
+    assert "2 links rejected." in captured.out
+    assert "planned" not in captured.out
+
+
+def test_dry_run_mixed_preview_states_both_counts(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One planned Item and one rejection are both stated."""
+    _install_fake_resolver(monkeypatch, {"https://example.com/fin": _BASIC_DOWNLOAD})
+
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            "https://example.com/fin",
+            "file:///etc/passwd",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Nothing was downloaded or written." in captured.out
+    assert "1 Item planned." in captured.out
+    assert "1 link rejected." in captured.out
+
+
+@pytest.mark.parametrize(
+    ("bad", "named"),
+    [("https://ex.com/x\nid", "'\\n'"), ("https://ex.com/x\0id", "'\\x00'")],
+)
+def test_dry_run_names_the_unsafe_character_by_repr(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str], bad: str, named: str
+) -> None:
+    """A newline or NUL is named, never echoed raw into the terminal."""
+    _install_fake_resolver(monkeypatch, {})
+
+    code = main(["--dry-run", "--folder", str(tmp_path), bad])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert f"a link contains an unsafe character: {named}" in captured.err
+    # The refusal is one line: a raw newline (or NUL) in the message would
+    # add another one.
+    assert captured.err.count("\n") == 1
+    assert "\0" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Unexpected failures keep the exit-code contract (ticket #24)
+# ---------------------------------------------------------------------------
+
+
+def _install_raising_resolver(monkeypatch, exc: BaseException) -> None:
+    """Install a resolver that raises ``exc`` for every link (ticket #24)."""
+
+    def resolver(url):
+        raise exc
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+
+def test_dry_run_unexpected_failure_prints_one_line_and_exits_5(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A surprise while previewing is named, not printed as a traceback."""
+    _install_raising_resolver(monkeypatch, RuntimeError("resolver went sideways"))
+
     code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
-    assert code != 0
+
+    captured = capsys.readouterr()
+    assert code == 5
+    assert captured.err.count("\n") == 1
+    assert (
+        "https://example.com/fin: unexpected (resolver went sideways)" in captured.err
+    )
+    assert "Traceback" not in captured.err
+
+
+def test_dry_run_unexpected_failure_with_one_plan_exits_1(
+    tmp_path, monkeypatch
+) -> None:
+    """One planned Item plus one surprise is still a partial success."""
+    good = "https://example.com/fin"
+
+    def resolver(url):
+        if url == good:
+            return dict(_BASIC_DOWNLOAD)
+        raise RuntimeError("resolver went sideways")
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            good,
+            "https://example.com/bad",
+        ]
+    )
+    assert code == 1
+
+
+def test_dry_run_refused_content_keeps_exit_4(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resolve-time refusal is not an unexpected failure (ticket #34)."""
+    _install_raising_resolver(monkeypatch, RefusedContent("DRM-protected content"))
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+
+    captured = capsys.readouterr()
+    assert code == 4
+    assert "DRM-protected content" in captured.err
+    assert "unexpected" not in captured.err
+    assert "1 link failed." in captured.out
+    assert "rejected" not in captured.out
+
+
+def test_dry_run_prerequisite_failure_keeps_exit_3(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resolve-time missing Prerequisite keeps its real-run code (#34)."""
+    _install_raising_resolver(monkeypatch, PrerequisiteMissing("ffmpeg is missing"))
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert "ffmpeg is missing" in captured.err
+    assert "unexpected" not in captured.err
+    assert "1 link failed." in captured.out
+    assert "rejected" not in captured.out
+
+
+def test_dry_run_does_not_swallow_keyboard_interrupt(tmp_path, monkeypatch) -> None:
+    """Ctrl+C is an interrupt, not an unexpected failure (``Exception`` only)."""
+    _install_raising_resolver(monkeypatch, KeyboardInterrupt("simulated Ctrl-C"))
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
 
 
 # ---------------------------------------------------------------------------

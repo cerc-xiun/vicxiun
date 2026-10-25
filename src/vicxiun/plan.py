@@ -56,10 +56,23 @@ def _validate_url(url: str) -> str:
         raise InvalidLinkError("a link is required")
     if url.startswith("-"):
         raise InvalidLinkError("a link cannot begin with '-'")
-    # Shell metacharacters that suggest argument injection.
-    shell_metas = ("$", "`", "|", ";", "&", ">", "<", "\n", "\r", "\0")
-    if any(m in url for m in shell_metas):
-        raise InvalidLinkError("a link contains an unsafe character")
+    # Shell metacharacters that suggest argument injection. ``&`` is not one
+    # of them: vicxiun never invokes a shell (yt-dlp's Python API, guarded by
+    # the source-level no-shell test), and ``&`` is how a URL carries a
+    # second query parameter (``&list=``, ``&index=``, ``&t=``).
+    shell_metas = ("$", "`", "|", ";", ">", "<", "\n", "\r", "\0")
+    offending: list[str] = []
+    for char in url:
+        if char in shell_metas and char not in offending:
+            offending.append(char)
+    if offending:
+        # ``repr`` of each character, never the raw one: a newline or NUL
+        # must not be echoed into the terminal, and naming the character is
+        # what makes the refusal actionable.
+        named = ", ".join(repr(char) for char in offending)
+        if len(offending) == 1:
+            raise InvalidLinkError(f"a link contains an unsafe character: {named}")
+        raise InvalidLinkError(f"a link contains unsafe characters: {named}")
     if not _HTTP_SCHEMES.match(url):
         raise InvalidLinkError(
             "only http:// and https:// links are accepted",
@@ -358,6 +371,9 @@ class Plan:
             "format_description": self.format_description,
             "target_path": str(self.target_path),
             "wait_for_stream": self.wait_for_stream,
+            # Present even for a plain video (0), so both renderings of the
+            # same Plan report the same count (ticket #25).
+            "playlist_count": self.playlist_count,
         }
         return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -427,15 +443,25 @@ def resolve_plan(
     )
 
 
-def render_summary(plans: Sequence[Plan]) -> str:
+def render_summary(plans: Sequence[Plan], rejected: int = 0, failed: int = 0) -> str:
     """Render the closing line for ``--dry-run``.
 
-    States explicitly that no Item was downloaded or written, and prints
-    the count of Items that were successfully planned. The wording is the
-    same for zero-, one- and many-Item Jobs; only the count differs.
+    States explicitly that no Item was downloaded or written, then the count
+    of Items that were successfully planned. ``rejected`` counts links refused
+    during validation; ``failed`` counts links that resolved but still produced
+    no Plan -- a refusal, a missing Prerequisite, or an unexpected failure
+    (ticket #34). A preview where nothing was planned must not read like a
+    clean preview (ticket #27).
     """
+    parts = ["Nothing was downloaded or written."]
     count = len(plans)
-    if count == 0:
-        return "Nothing was downloaded or written.\n"
-    item_word = "Item" if count == 1 else "Items"
-    return f"Nothing was downloaded or written. {count} {item_word} planned.\n"
+    if count:
+        item_word = "Item" if count == 1 else "Items"
+        parts.append(f"{count} {item_word} planned.")
+    if rejected:
+        link_word = "link" if rejected == 1 else "links"
+        parts.append(f"{rejected} {link_word} rejected.")
+    if failed:
+        link_word = "link" if failed == 1 else "links"
+        parts.append(f"{failed} {link_word} failed.")
+    return " ".join(parts) + "\n"

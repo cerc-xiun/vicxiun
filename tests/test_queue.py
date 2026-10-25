@@ -26,6 +26,7 @@ from _fakes import (
     install_executor,
     install_resolver,
 )
+from yt_dlp.utils import DownloadError
 
 from vicxiun.cli import main
 from vicxiun.errors import RefusedContent, UserError
@@ -172,6 +173,61 @@ def test_a_failed_resolution_does_not_stop_the_rest(
     assert len(files) == 2
     # The unresolvable link was reported, not swallowed.
     assert "https://example.com/dead" in captured.err
+
+
+def test_an_unnamed_resolve_failure_fails_its_item_not_the_queue(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """AC (ticket #29): a raw resolver failure is contained to its Item.
+
+    The resolver raises an untranslated ``DownloadError`` -- what a dead
+    or truncated link looks like before the engine names it. The Item
+    must be recorded as failed, the already-finished Item's file left
+    alone, the Item after the dead one still run, the summary printed,
+    and the exit code 1 (partial success).
+    """
+    good = "https://example.com/good"
+    dead = "https://example.com/dead"
+    later = "https://example.com/later"
+    metadata = {
+        good: {**BASIC_DOWNLOAD, "video_id": "idGOOD"},
+        later: {**BASIC_DOWNLOAD, "video_id": "idLATER"},
+    }
+    # Also pins the passing Prereq stub; the resolver below replaces only
+    # that half of the fake.
+    install_resolver(monkeypatch, metadata)
+
+    def dead_link_resolver(url: str) -> dict[str, object]:
+        if url == dead:
+            raise DownloadError(
+                "[youtube] hsLiJP2rqS: Incomplete YouTube ID hsLiJP2rqS. "
+                "URL looks truncated."
+            )
+        return dict(metadata[url])
+
+    # Replace the installed fake resolver with one that raises yt-dlp's
+    # raw error for the dead link: the Queue must contain it itself.
+    monkeypatch.setattr("vicxiun.cli._resolver", dead_link_resolver)
+
+    def writing_executor(plan, progress):
+        plan.target_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.target_path.write_bytes(plan.url.encode())
+        return plan.target_path
+
+    install_executor(monkeypatch, writing_executor)
+
+    code = main(["--folder", str(tmp_path), good, dead, later])
+
+    captured = capsys.readouterr()
+    err = captured.err
+    assert code == 1  # partial success
+    assert "Traceback" not in err
+    assert f"failed: {dead}" in err
+    assert "Incomplete YouTube ID" in err
+    assert "2 ok, 1 failed." in err
+    # The finished Items' files are on disk, untouched by the failure.
+    files = list((tmp_path / "Some Channel").iterdir())
+    assert {p.read_bytes() for p in files} == {good.encode(), later.encode()}
 
 
 # ---------------------------------------------------------------------------

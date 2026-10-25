@@ -277,6 +277,24 @@ def test_executor_options_install_progress_hooks_when_given() -> None:
     assert opts["progress_hooks"] == [hook]
 
 
+def test_executor_options_silence_yt_dlps_own_progress_bar() -> None:
+    """``noprogress`` is what stops yt-dlp drawing a bar of its own.
+
+    yt-dlp chooses its printer from ``noprogress`` and ignores ``quiet``
+    for this, so without it every progress line appeared twice: yt-dlp's
+    bar on stdout plus the hook's line on stderr (ticket #30). Hooks must
+    still be wired, or the progress printer and the disk-space guard
+    would go silent too.
+    """
+
+    def hook(d: dict[str, object]) -> None:
+        pass
+
+    opts = _build_executor_options(_make_plan(), hook)
+    assert opts["noprogress"] is True
+    assert opts["progress_hooks"] == [hook]
+
+
 def test_executor_options_carry_the_safety_defaults() -> None:
     """The executor must inherit the safety defaults so a regression in
     ``_build_executor_options`` cannot silently re-enable anything.

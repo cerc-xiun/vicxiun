@@ -150,6 +150,11 @@ def test_resolve_plan_rejects_shell_metacharacters() -> None:
         "https://ex.com/`id`",
         "https://ex.com/x;rm -rf /",
         "https://ex.com/ | nc evil 1",
+        "https://ex.com/x > file",
+        "https://ex.com/x < file",
+        "https://ex.com/x\nid",
+        "https://ex.com/x\rid",
+        "https://ex.com/x\0id",
     ):
         with pytest.raises(UserError):
             resolve_plan(
@@ -158,6 +163,55 @@ def test_resolve_plan_rejects_shell_metacharacters() -> None:
                 output_root=Path("/out"),
                 resolver=resolver,
             )
+
+
+@pytest.mark.parametrize(
+    ("url", "named"),
+    [
+        ("https://ex.com/x\nid", ("'\\n'",)),
+        ("https://ex.com/x\0id", ("'\\x00'",)),
+        ("https://ex.com/$(x)|y", ("'$'", "'|'")),
+    ],
+)
+def test_resolve_plan_names_the_unsafe_characters_by_repr(
+    url: str, named: tuple[str, ...]
+) -> None:
+    """Each offending character is named via ``repr``, never raw (ticket #27)."""
+    with pytest.raises(InvalidLinkError) as excinfo:
+        resolve_plan(
+            url,
+            profile=PhoneSafeProfile(),
+            output_root=Path("/out"),
+            resolver=_FakeResolver({}),
+        )
+    message = str(excinfo.value)
+    for piece in named:
+        assert piece in message
+    assert "\0" not in message
+    assert "\n" not in message
+
+
+def test_resolve_plan_accepts_a_multi_parameter_url(tmp_path: Path) -> None:
+    """A share link keeps every query parameter: accepted, never rewritten."""
+    url = (
+        "https://www.youtube.com/watch?v=hsLiJP2rqS8"
+        "&list=RDGMEMQ1dJ7wXfLlqCJ7yduJHqQ&index=2&t=42s&si=AbCdEf123"
+    )
+    resolver = _FakeResolver(
+        {
+            url: _FakeMetadata(
+                title="t",
+                uploader="u",
+                ext="mp4",
+                is_live=False,
+                format_description="MP4 1080p",
+                video_id="hsLiJP2rqS8",
+            )
+        }
+    )
+    plan = resolve_plan(url, PhoneSafeProfile(), tmp_path, resolver)
+    assert plan.url == url
+    assert resolver.calls == [url]
 
 
 def test_resolve_plan_does_not_treat_dash_prefix_as_flag(tmp_path: Path) -> None:
@@ -564,3 +618,22 @@ def test_plan_to_json_roundtrips() -> None:
     assert payload["url"] == "https://example.com/v"
     assert payload["kind"] == "Download"
     assert payload["profile"] == "phone-safe"
+    # A plain video: the human rendering prints no Playlist line, so the
+    # JSON carries a zero rather than omitting the field.
+    assert payload["playlist_count"] == 0
+    assert "Playlist :" not in plan.render()
+
+
+def test_plan_to_json_agrees_with_render_on_playlist_count() -> None:
+    """Both renderings of a Playlist Plan report the same count (ticket #25)."""
+    plan = Plan(
+        url="https://example.com/mix",
+        kind=DownloadKind(),
+        profile=PhoneSafeProfile(),
+        format_description="playlist of 7 Items",
+        target_path=Path("/out/Chan/A Big Mix [pl123]"),
+        playlist_count=7,
+    )
+    payload = json.loads(plan.to_json())
+    assert payload["playlist_count"] == 7
+    assert f"Playlist : {payload['playlist_count']} Items" in plan.render()

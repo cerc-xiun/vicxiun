@@ -94,15 +94,21 @@ def normalise_resolver_result(info: object) -> dict[str, object]:
     requires ``video_id``. Its raw dict also has no top-level
     human-readable format description, so one is built from the selected
     stream's ``resolution`` and ``ext`` -- the Plan prints it as the
-    ``Format`` line (display only). Anything the raw dict already
-    supplies is kept, so the resolver result still surfaces everything
-    yt-dlp reported.
+    ``Format`` line (display only). A link with no formats at all (a
+    scheduled stream that has not started -- ticket #28) has no selected
+    stream either, so both fall back: the description reads ``unknown``
+    and ``ext`` is empty. Anything the raw dict already supplies is kept,
+    so the resolver result still surfaces everything yt-dlp reported.
     """
     if not isinstance(info, dict):
         return {}
     result = dict(info)
     if not result.get("video_id"):
         result["video_id"] = result.get("id") or ""
+    # ``ext`` is a per-format field in yt-dlp: with no formats selected
+    # the key is absent, but ``plan._to_metadata`` requires it (ticket #28).
+    if not result.get("ext"):
+        result["ext"] = ""
     if not result.get("format_description"):
         resolution = str(result.get("resolution") or "unknown")
         ext = str(result.get("ext") or "")
@@ -125,7 +131,18 @@ class YtDlpEngine:
         self._options = _safe_default_options()
 
     def resolve_metadata(self, url: str) -> dict[str, object]:
-        return self._resolver(url)
+        """Return metadata for ``url`` without downloading media.
+
+        Any ``yt_dlp.DownloadError`` raised by the resolver (real or
+        substituted) is translated to one of ``vicxiun``'s named errors
+        here, exactly as ``execute`` does on the download side. A
+        resolve-time yt-dlp failure must never escape as a raw
+        ``DownloadError`` traceback (ticket #28).
+        """
+        try:
+            return self._resolver(url)
+        except DownloadError as exc:
+            _translate_download_error(exc)
 
     def execute(
         self,
@@ -161,6 +178,14 @@ class YtDlpEngine:
         options = _safe_default_options()
         options["quiet"] = True
         options["no_warnings"] = True
+        # Resolver-only. yt-dlp treats "no formats" as an *expected* error
+        # for some links -- most importantly a scheduled stream
+        # (``live_status="is_upcoming"``: "this live event will begin
+        # in ..."), whose info dict is thrown away before planning runs
+        # unless this is set (ticket #28). Deliberately NOT part of
+        # ``_safe_default_options``: the executor shares those, and a
+        # link with no formats must still fail at execute time.
+        options["ignore_no_formats_error"] = True
         # Inside a playlist, resolve the entries flat: the metadata
         # request must report how many Items the playlist holds (ticket
         # #15) without fetching every entry's metadata first -- a
@@ -324,6 +349,11 @@ def _build_executor_options(
     """
     options = _safe_default_options()
     options["quiet"] = True
+    # yt-dlp picks its progress printer from ``noprogress``, not from
+    # ``quiet``, so ``quiet`` alone still draws a bar. Hooks fire either
+    # way (the progress printer and the disk-space guard both ride them):
+    # this only stops yt-dlp writing a second, duplicate progress line.
+    options["noprogress"] = True
     options["no_warnings"] = True
     options["format"] = plan.profile.format_selector
     # The Profile's sort is what expresses its codec and resolution

