@@ -126,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=PROG,
+        allow_abbrev=False,
         description=(
             "Download finished videos and capture live streams.\n\n"
             "Choices made once are remembered: run 'vicxiun settings' to "
