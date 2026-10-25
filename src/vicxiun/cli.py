@@ -16,7 +16,13 @@ from pathlib import Path
 
 from vicxiun import __version__
 from vicxiun.engine import build_default_engine
-from vicxiun.errors import UnexpectedFailure, UserError
+from vicxiun.errors import (
+    PrerequisiteMissing,
+    RefusedContent,
+    UnexpectedFailure,
+    UserError,
+    exit_code_for,
+)
 from vicxiun.plan import (
     InvalidLinkError,
     Plan,
@@ -371,8 +377,9 @@ def _run_dry_run(
     record.
 
     Exit codes follow the same contract as a real run (ticket #24):
-    a partly planned Job is 1, a wholly refused Job is 2, and a Job
-    that planned nothing because something unexpected was raised is 5.
+    a partly planned Job is 1, a wholly rejected Job is 2, a refused
+    link is 4, a missing Prerequisite is 3, and a Job that planned
+    nothing because something unexpected was raised is 5.
     """
     plans: list[Plan] = []
     failures: list[tuple[str, BaseException]] = []
@@ -385,7 +392,12 @@ def _run_dry_run(
                 _resolve_metadata,
                 wait_for_stream=args.wait_for_stream,
             )
-        except (InvalidLinkError, UserError) as exc:
+        except (
+            InvalidLinkError,
+            UserError,
+            RefusedContent,
+            PrerequisiteMissing,
+        ) as exc:
             failures.append((link, exc))
             print(str(exc), file=sys.stderr)
             continue
@@ -402,16 +414,25 @@ def _run_dry_run(
 
     for plan in plans:
         print(plan.render(), end="")
-    # Every link that produced no Plan is named in the summary, so a preview
-    # that rejected everything cannot read like a clean preview (ticket #27).
-    print(render_summary(plans, rejected=len(failures)), end="")
+    # Every link that produced no Plan is counted in the summary, so a
+    # preview that rejected everything cannot read like a clean preview
+    # (ticket #27). Refusals and Prerequisite failures are not rejections;
+    # they get their own count (ticket #34).
+    rejected = sum(1 for _, error in failures if isinstance(error, InvalidLinkError))
+    print(
+        render_summary(plans, rejected=rejected, failed=len(failures) - rejected),
+        end="",
+    )
 
     if failures and plans:
         return 1
     if failures:
+        # A surprise is an unexpected failure (ticket #24); anything named
+        # keeps its real-run code -- user error 2, missing Prerequisite 3,
+        # refused content 4 (ticket #34).
         if any(isinstance(error, UnexpectedFailure) for _, error in failures):
             return 5
-        return 2
+        return exit_code_for(failures[0][1])
     return 0
 
 

@@ -23,6 +23,7 @@ import pytest
 
 from vicxiun import cli
 from vicxiun.cli import main
+from vicxiun.errors import PrerequisiteMissing, RefusedContent
 
 # ---------------------------------------------------------------------------
 # Test fixtures
@@ -407,6 +408,38 @@ def test_dry_run_unexpected_failure_with_one_plan_exits_1(
         ]
     )
     assert code == 1
+
+
+def test_dry_run_refused_content_keeps_exit_4(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resolve-time refusal is not an unexpected failure (ticket #34)."""
+    _install_raising_resolver(monkeypatch, RefusedContent("DRM-protected content"))
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+
+    captured = capsys.readouterr()
+    assert code == 4
+    assert "DRM-protected content" in captured.err
+    assert "unexpected" not in captured.err
+    assert "1 link failed." in captured.out
+    assert "rejected" not in captured.out
+
+
+def test_dry_run_prerequisite_failure_keeps_exit_3(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resolve-time missing Prerequisite keeps its real-run code (#34)."""
+    _install_raising_resolver(monkeypatch, PrerequisiteMissing("ffmpeg is missing"))
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+
+    captured = capsys.readouterr()
+    assert code == 3
+    assert "ffmpeg is missing" in captured.err
+    assert "unexpected" not in captured.err
+    assert "1 link failed." in captured.out
+    assert "rejected" not in captured.out
 
 
 def test_dry_run_does_not_swallow_keyboard_interrupt(tmp_path, monkeypatch) -> None:

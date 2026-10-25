@@ -443,13 +443,15 @@ def resolve_plan(
     )
 
 
-def render_summary(plans: Sequence[Plan], rejected: int = 0) -> str:
+def render_summary(plans: Sequence[Plan], rejected: int = 0, failed: int = 0) -> str:
     """Render the closing line for ``--dry-run``.
 
     States explicitly that no Item was downloaded or written, then the count
-    of Items that were successfully planned and -- when ``rejected`` is
-    non-zero -- how many links produced no Plan at all. A preview where every
-    link was refused must not read like a clean preview (ticket #27).
+    of Items that were successfully planned. ``rejected`` counts links refused
+    during validation; ``failed`` counts links that resolved but still produced
+    no Plan -- a refusal, a missing Prerequisite, or an unexpected failure
+    (ticket #34). A preview where nothing was planned must not read like a
+    clean preview (ticket #27).
     """
     parts = ["Nothing was downloaded or written."]
     count = len(plans)
@@ -459,4 +461,7 @@ def render_summary(plans: Sequence[Plan], rejected: int = 0) -> str:
     if rejected:
         link_word = "link" if rejected == 1 else "links"
         parts.append(f"{rejected} {link_word} rejected.")
+    if failed:
+        link_word = "link" if failed == 1 else "links"
+        parts.append(f"{failed} {link_word} failed.")
     return " ".join(parts) + "\n"

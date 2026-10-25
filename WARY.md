@@ -280,3 +280,18 @@ settings file location inside Termux's private home is standard but
 - `test_rule_3` monkeypatches `subprocess.run`/`subprocess.Popen` to
   explode and `shutil.which` to `None`; monkeypatch undoes it, no ordering
   coupling with other tests.
+
+## From #24-#34 (review follow-ups)
+
+- `&` is accepted in a link on purpose (ticket #26): vicxiun never invokes
+  a shell, and the source-level no-shell test is the guarantee. Do not
+  re-add `&` to `_validate_url`'s metacharacter tuple because it "looks
+  like" a shell operator.
+- `ignore_no_formats_error` belongs to the **resolver** options only
+  (ticket #28). Do not move it into `_safe_default_options`: the executor
+  shares those, and a link with no formats must still fail at execute time.
+- #28's real upcoming-stream check and #30's real-download check are still
+  owed. The automated tests prove the seams, not yt-dlp's real behaviour.
+- `--dry-run` keeps the refused (4) and missing-Prerequisite (3) codes by
+  naming those resolve failures before its catch-all (ticket #34). A new
+  named error needs the same treatment.
