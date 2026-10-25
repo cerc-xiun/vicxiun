@@ -245,18 +245,80 @@ def test_dry_run_returns_partial_when_some_links_fail(tmp_path, monkeypatch) -> 
     assert code == 1
 
 
-def test_dry_run_returns_nonzero_when_the_link_cannot_resolve(
+def test_dry_run_returns_user_error_code_when_the_link_cannot_resolve(
+    tmp_path, monkeypatch
+) -> None:
+    """An unresolvable link is a named user error: nothing planned, exit 2."""
+    _install_fake_resolver(monkeypatch, {})
+
+    code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
+    assert code == 2
+
+
+# ---------------------------------------------------------------------------
+# Unexpected failures keep the exit-code contract (ticket #24)
+# ---------------------------------------------------------------------------
+
+
+def _install_raising_resolver(monkeypatch, exc: BaseException) -> None:
+    """Install a resolver that raises ``exc`` for every link (ticket #24)."""
+
+    def resolver(url):
+        raise exc
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+
+def test_dry_run_unexpected_failure_prints_one_line_and_exits_5(
     tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """An unresolvable link yields a user-error code."""
-    from vicxiun.errors import UserError
+    """A surprise while previewing is named, not printed as a traceback."""
+    _install_raising_resolver(monkeypatch, RuntimeError("resolver went sideways"))
 
-    def raising(url):
-        raise UserError(f"engine cannot resolve {url}")
-
-    monkeypatch.setattr(cli, "_resolver", raising)
     code = main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
-    assert code != 0
+
+    captured = capsys.readouterr()
+    assert code == 5
+    assert captured.err.count("\n") == 1
+    assert (
+        "https://example.com/fin: unexpected (resolver went sideways)" in captured.err
+    )
+    assert "Traceback" not in captured.err
+
+
+def test_dry_run_unexpected_failure_with_one_plan_exits_1(
+    tmp_path, monkeypatch
+) -> None:
+    """One planned Item plus one surprise is still a partial success."""
+    good = "https://example.com/fin"
+
+    def resolver(url):
+        if url == good:
+            return dict(_BASIC_DOWNLOAD)
+        raise RuntimeError("resolver went sideways")
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+    code = main(
+        [
+            "--dry-run",
+            "--folder",
+            str(tmp_path),
+            good,
+            "https://example.com/bad",
+        ]
+    )
+    assert code == 1
+
+
+def test_dry_run_does_not_swallow_keyboard_interrupt(tmp_path, monkeypatch) -> None:
+    """Ctrl+C is an interrupt, not an unexpected failure (``Exception`` only)."""
+    _install_raising_resolver(monkeypatch, KeyboardInterrupt("simulated Ctrl-C"))
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["--dry-run", "--folder", str(tmp_path), "https://example.com/fin"])
 
 
 # ---------------------------------------------------------------------------
