@@ -47,7 +47,7 @@ preference and left for the next session to decide on.
 | 2.8 | an unknown flag is accepted when it abbreviates a real one | hand, terminal | fixed c826b76 |
 | 2.9 | members-only refused with the wrong reason and exit code | hand, question | fixed c215b97 |
 | 2.10 | `--dry-run` miscodes refused/prerequisite resolve failures | review, reproduced | fixed 2b939d6 |
-| 3 | story 33 retryable/not is implied, never stated | review | decided #32; implementation #33 open |
+| 3 | story 33 retryable/not is implied, never stated | review | fixed d780a93 |
 | 8.1 | progress: one updating line instead of many | hand, preference | decision owed |
 | 8.2 | clean links automatically? (recommendation: no — accept them) | hand, preference | decision owed |
 | 8.3 | a line with two links silently becomes one (yt-dlp eats the tail) | hand, preference | decision owed |
@@ -315,7 +315,7 @@ preference and left for the next session to decide on.
   `TransientError(UserError)` with label `temporary` and a pinned sentence,
   decided only by what the user is *told*. No retry mechanism, no backoff, no
   concurrency — out of scope for Milestone 1.
-- **Owed (#33, open):** the implementation — the subclass, the label, the
+- **Landed in d780a93 (#33):** the implementation — the subclass, the label, the
   sentence, the phrase list, the rule that a 4xx stays `user error`, and the
   guard that the exit code remains 2.
 

@@ -441,6 +441,8 @@ def test_a_transient_failure_is_advice_not_a_retry(tmp_path: Path, monkeypatch) 
         attempts["resolve"] += 1
         return dict(BASIC_DOWNLOAD)
 
+    # ``install_resolver`` above pinned the passing Prereq stub; only
+    # the resolver half is replaced here, to count the attempts.
     monkeypatch.setattr("vicxiun.cli._resolver", counting_resolver)
 
     def raising_executor(plan, progress):

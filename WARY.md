@@ -306,6 +306,9 @@ settings file location inside Termux's private home is standard but
   `temporary`, exit 2, and the advice ("... running the same command again
   may work.") is the message's own tail — which is why the per-Item line
   and the summary both carry it with no second mechanism to keep in sync.
+  A *resolve*-time failure's per-Item line is bare `str(exc)`, as it is for
+  every named resolve error (pre-existing); its summary line still carries
+  the label.
 - The classifier in `_translate_download_error` is a deliberately short
   POSITIVE phrase list (`_TRANSIENT_PHRASES`). yt-dlp words an `HTTPError`
   and a `TransportError` the same way ("Unable to download webpage: ..."),
