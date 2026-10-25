@@ -193,6 +193,8 @@ def test_an_unnamed_resolve_failure_fails_its_item_not_the_queue(
         good: {**BASIC_DOWNLOAD, "video_id": "idGOOD"},
         later: {**BASIC_DOWNLOAD, "video_id": "idLATER"},
     }
+    # Also pins the passing Prereq stub; the resolver below replaces only
+    # that half of the fake.
     install_resolver(monkeypatch, metadata)
 
     def dead_link_resolver(url: str) -> dict[str, object]:
