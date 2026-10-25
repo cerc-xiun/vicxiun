@@ -335,6 +335,25 @@ def test_translate_download_error_for_premium() -> None:
         )
 
 
+def test_translate_download_error_for_members_only() -> None:
+    """Members-only is a refusal, not a generic dead link (ticket #38)."""
+    from yt_dlp.utils import DownloadError
+
+    with pytest.raises(RefusedContent):
+        _translate_download_error(
+            DownloadError("Join this channel to get access to members-only content")
+        )
+
+
+def test_translate_download_error_does_not_guess_invented_purchase_phrases() -> None:
+    """The two unobserved phrases were removed, not kept as guesses (#38)."""
+    from yt_dlp.utils import DownloadError
+
+    for phrase in ("requires purchase", "subscription required"):
+        with pytest.raises(UserError):
+            _translate_download_error(DownloadError(f"video error: {phrase}"))
+
+
 def test_translate_download_error_for_node_missing() -> None:
     from yt_dlp.utils import DownloadError
 

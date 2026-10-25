@@ -41,8 +41,6 @@ _DRM_PHRASES = (
     "sign in to confirm",
     "premium",
     "members only",
-    "requires purchase",
-    "subscription required",
 )
 # yt-dlp phrases that mean a Prerequisite program (almost always ffmpeg
 # these days) is missing from the machine. Kept narrow on purpose: a
@@ -385,7 +383,9 @@ def _translate_download_error(exc: DownloadError) -> None:
     dead, the video was removed, or the user typed something the engine
     did not understand). The function always raises.
     """
-    message = str(exc).lower()
+    # Hyphens are normalised so "members-only" matches the "members only"
+    # phrase above; the observed yt-dlp message is hyphenated (ticket #38).
+    message = str(exc).lower().replace("-", " ")
 
     for phrase in _DRM_PHRASES:
         if phrase in message:

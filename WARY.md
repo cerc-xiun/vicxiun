@@ -295,3 +295,7 @@ settings file location inside Termux's private home is standard but
 - `--dry-run` keeps the refused (4) and missing-Prerequisite (3) codes by
   naming those resolve failures before its catch-all (ticket #34). A new
   named error needs the same treatment.
+- Members-only content is a refusal (`RefusedContent`, exit 4), not a user
+  error (ticket #38). The observed yt-dlp message is hyphenated, so
+  `_translate_download_error` normalises hyphens before matching. Cookies
+  were withdrawn: do not reintroduce `--cookies` or browser extraction.
