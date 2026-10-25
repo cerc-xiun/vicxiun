@@ -192,6 +192,13 @@ Stated plainly, so nobody finds them by surprise:
   ([ADR-0006](docs/adr/0006-termux-is-the-android-path.md)).
 - **DRM and paywalled content is refused, permanently.** A feature, not a
   gap — see the statement at the top of this file.
+- **Members-only content is not supported, and not planned.** It would mean
+  holding a copy of your account session, and a YouTube session cookie is a
+  full-account credential with no read-only or per-channel variant. The risk is
+  not the file either — automated downloading while signed in is what account
+  enforcement looks at, and that cannot be engineered away inside a download
+  tool. Ask the creator: members often get files directly, and some videos
+  become public later.
 - **A playlist that fails part-way keeps what finished.** A playlist
   downloads one file per video into its own folder; a failure or an
   interrupt stops the run there, and re-running the same command skips
