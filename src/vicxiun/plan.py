@@ -61,8 +61,18 @@ def _validate_url(url: str) -> str:
     # the source-level no-shell test), and ``&`` is how a URL carries a
     # second query parameter (``&list=``, ``&index=``, ``&t=``).
     shell_metas = ("$", "`", "|", ";", ">", "<", "\n", "\r", "\0")
-    if any(m in url for m in shell_metas):
-        raise InvalidLinkError("a link contains an unsafe character")
+    offending: list[str] = []
+    for char in url:
+        if char in shell_metas and char not in offending:
+            offending.append(char)
+    if offending:
+        # ``repr`` of each character, never the raw one: a newline or NUL
+        # must not be echoed into the terminal, and naming the character is
+        # what makes the refusal actionable.
+        named = ", ".join(repr(char) for char in offending)
+        if len(offending) == 1:
+            raise InvalidLinkError(f"a link contains an unsafe character: {named}")
+        raise InvalidLinkError(f"a link contains unsafe characters: {named}")
     if not _HTTP_SCHEMES.match(url):
         raise InvalidLinkError(
             "only http:// and https:// links are accepted",
@@ -433,15 +443,20 @@ def resolve_plan(
     )
 
 
-def render_summary(plans: Sequence[Plan]) -> str:
+def render_summary(plans: Sequence[Plan], rejected: int = 0) -> str:
     """Render the closing line for ``--dry-run``.
 
-    States explicitly that no Item was downloaded or written, and prints
-    the count of Items that were successfully planned. The wording is the
-    same for zero-, one- and many-Item Jobs; only the count differs.
+    States explicitly that no Item was downloaded or written, then the count
+    of Items that were successfully planned and -- when ``rejected`` is
+    non-zero -- how many links produced no Plan at all. A preview where every
+    link was refused must not read like a clean preview (ticket #27).
     """
+    parts = ["Nothing was downloaded or written."]
     count = len(plans)
-    if count == 0:
-        return "Nothing was downloaded or written.\n"
-    item_word = "Item" if count == 1 else "Items"
-    return f"Nothing was downloaded or written. {count} {item_word} planned.\n"
+    if count:
+        item_word = "Item" if count == 1 else "Items"
+        parts.append(f"{count} {item_word} planned.")
+    if rejected:
+        link_word = "link" if rejected == 1 else "links"
+        parts.append(f"{rejected} {link_word} rejected.")
+    return " ".join(parts) + "\n"
