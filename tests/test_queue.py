@@ -29,7 +29,8 @@ from _fakes import (
 from yt_dlp.utils import DownloadError
 
 from vicxiun.cli import main
-from vicxiun.errors import RefusedContent, UserError
+from vicxiun.engine import YtDlpEngine
+from vicxiun.errors import EXIT_CODE, RefusedContent, TransientError, UserError
 
 
 def _writing_executor(plan, progress):
@@ -332,6 +333,124 @@ def test_the_exit_code_reflects_the_mix_of_outcomes(
 
     code = main(["--folder", str(tmp_path), *links])
     assert code == expected
+
+
+# ---------------------------------------------------------------------------
+# AC (ticket #33): a temporary failure says so, and is never retried
+# ---------------------------------------------------------------------------
+
+TRANSIENT_MESSAGE = "ERROR: unable to download video data: The read operation timed out"
+DEAD_LINK_MESSAGE = "ERROR: Unable to download webpage: HTTP Error 404: Not Found"
+ADVISORY = "this is usually temporary; running the same command again may work."
+
+
+def test_a_transient_failure_reads_as_temporary_and_a_dead_link_does_not(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ticket #33: the label and the advisory sentence, in both places.
+
+    A timeout is labelled ``temporary`` and carries the advisory as its
+    message tail; a dead link keeps ``user error`` and gains nothing.
+    The engine's own translation is in the path, so the seam under test
+    is the one a real run uses.
+    """
+    transient = "https://example.com/transient"
+    dead = "https://example.com/dead"
+    install_resolver(
+        monkeypatch,
+        {
+            transient: {**BASIC_DOWNLOAD, "video_id": "idTRANSIENT"},
+            dead: {**BASIC_DOWNLOAD, "video_id": "idDEAD"},
+        },
+    )
+
+    def raising_executor(plan, progress):
+        raise DownloadError(
+            TRANSIENT_MESSAGE if plan.url == transient else DEAD_LINK_MESSAGE
+        )
+
+    install_executor(monkeypatch, YtDlpEngine(executor=raising_executor).execute)
+
+    code = main(["--folder", str(tmp_path), transient, dead])
+
+    err = capsys.readouterr().err
+    lines = err.splitlines()
+    # The plan line also starts with the link, so pick the failure line by
+    # its detail; the equality below is what pins the label and wording.
+    transient_line = next(
+        line
+        for line in lines
+        if line.startswith(f"{transient}: ") and "network problem" in line
+    )
+    dead_line = next(
+        line
+        for line in lines
+        if line.startswith(f"{dead}: ") and "could not download" in line
+    )
+    # The per-Item line: the label, then the message and its advisory tail.
+    assert transient_line == (
+        f"{transient}: temporary (network problem: {TRANSIENT_MESSAGE} — {ADVISORY})"
+    )
+    assert dead_line == f"{dead}: user error (could not download {DEAD_LINK_MESSAGE})"
+    # The summary repeats both, verbatim.
+    assert (
+        f"failed: {transient} (temporary: network problem: "
+        f"{TRANSIENT_MESSAGE} — {ADVISORY})"
+    ) in err
+    assert f"failed: {dead} (user error: could not download {DEAD_LINK_MESSAGE})" in err
+    assert "0 ok, 2 failed." in err
+    # Everything failed; a transient failure is still exit 2.
+    assert code == 2
+
+
+def test_a_wholly_failed_transient_run_keeps_the_user_error_exit_code(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Ticket #33: ``TransientError`` adds no exit code.
+
+    It is a ``UserError``, so a wholly failed run still exits 2 and the
+    public contract in ``EXIT_CODE`` is unchanged.
+    """
+    links = ["https://example.com/a", "https://example.com/b"]
+    install_resolver(
+        monkeypatch,
+        {link: {**BASIC_DOWNLOAD, "video_id": f"id{link[-1]}"} for link in links},
+    )
+
+    def raising_executor(plan, progress):
+        raise DownloadError(TRANSIENT_MESSAGE)
+
+    install_executor(monkeypatch, YtDlpEngine(executor=raising_executor).execute)
+
+    assert main(["--folder", str(tmp_path), *links]) == 2
+    assert EXIT_CODE[UserError] == 2
+    assert TransientError not in EXIT_CODE
+
+
+def test_a_transient_failure_is_advice_not_a_retry(tmp_path: Path, monkeypatch) -> None:
+    """Exactly one resolve and one execute attempt per Item (ticket #33).
+
+    The advisory tells the user to run the command again; vicxiun must
+    not. A retry loop would show up here as a count above one.
+    """
+    link = "https://example.com/a"
+    install_resolver(monkeypatch, {link: BASIC_DOWNLOAD})
+    attempts = {"resolve": 0, "execute": 0}
+
+    def counting_resolver(url: str) -> dict[str, object]:
+        attempts["resolve"] += 1
+        return dict(BASIC_DOWNLOAD)
+
+    monkeypatch.setattr("vicxiun.cli._resolver", counting_resolver)
+
+    def raising_executor(plan, progress):
+        attempts["execute"] += 1
+        raise DownloadError(TRANSIENT_MESSAGE)
+
+    install_executor(monkeypatch, YtDlpEngine(executor=raising_executor).execute)
+
+    assert main(["--folder", str(tmp_path), link]) == 2
+    assert attempts == {"resolve": 1, "execute": 1}
 
 
 # ---------------------------------------------------------------------------

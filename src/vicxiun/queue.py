@@ -44,6 +44,7 @@ from vicxiun.errors import (
     PartialSuccess,
     PrerequisiteMissing,
     RefusedContent,
+    TransientError,
     UnexpectedFailure,
     UserError,
 )
@@ -185,6 +186,9 @@ _OUTCOME_LABELS: dict[type[BaseException], str] = {
     KeyboardInterrupt: "interrupted",
     RefusedContent: "refused",
     PrerequisiteMissing: "missing prereq",
+    # Before UserError: label_for walks the MRO, so the subclass must
+    # have its own entry or a transient failure reads as "user error".
+    TransientError: "temporary",
     UserError: "user error",
     UnexpectedFailure: "unexpected",
 }

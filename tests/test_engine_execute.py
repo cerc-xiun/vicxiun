@@ -35,6 +35,7 @@ from vicxiun.engine import (
 from vicxiun.errors import (
     PrerequisiteMissing,
     RefusedContent,
+    TransientError,
     UserError,
 )
 from vicxiun.plan import (
@@ -364,8 +365,114 @@ def test_translate_download_error_for_node_missing() -> None:
 def test_translate_download_error_for_unrecognised_falls_through() -> None:
     from yt_dlp.utils import DownloadError
 
-    with pytest.raises(UserError):
+    with pytest.raises(UserError) as excinfo:
         _translate_download_error(DownloadError("HTTP Error 410: video gone"))
+
+    # The exact type: a TransientError is a UserError, so the bare
+    # ``pytest.raises`` above would not notice a 4xx turning retryable.
+    assert type(excinfo.value) is UserError
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # A read/socket timeout, in both spellings yt-dlp emits.
+        "The read operation timed out",
+        "socket timeout while reading",
+        # DNS: the observed 2026-10-25 failure.
+        "[Errno 11001] getaddrinfo failed",
+        "Temporary failure in name resolution",
+        # A dropped or refused TCP connection.
+        "Connection reset by peer",
+        "Connection aborted.",
+        "[Errno 111] Connection refused",
+        # A broken route, or a peer that hung up mid-response.
+        "Network is unreachable",
+        "Remote end closed connection without response",
+        # A truncated response body.
+        "incomplete read (123 bytes read, 456 more expected)",
+        # Rate limiting and server-side failures: worth another go.
+        "HTTP Error 429: Too Many Requests",
+        "HTTP Error 503: Service Unavailable",
+    ],
+)
+def test_translate_download_error_for_transient_network_failures(
+    message: str,
+) -> None:
+    """One case per retryable phrase family (ticket #33).
+
+    The list is deliberately short and positive: these phrases are the
+    only evidence that the network failed rather than the link.
+    """
+    from yt_dlp.utils import DownloadError
+
+    with pytest.raises(TransientError):
+        _translate_download_error(DownloadError(message))
+
+
+def test_translate_download_error_pins_the_advisory_sentence() -> None:
+    """The retry advice is the message's own tail (ticket #33).
+
+    Both the per-Item line and the summary print ``str(error)``, so the
+    sentence reaches the user with no second mechanism.
+    """
+    from yt_dlp.utils import DownloadError
+
+    raw = "ERROR: unable to download video data: The read operation timed out"
+    with pytest.raises(TransientError) as excinfo:
+        _translate_download_error(DownloadError(raw))
+
+    assert str(excinfo.value) == (
+        f"network problem: {raw} — this is usually temporary; "
+        "running the same command again may work."
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "HTTP Error 404: Not Found",
+        "HTTP Error 403: Forbidden",
+        "HTTP Error 410: video gone",
+    ],
+)
+def test_translate_download_error_keeps_http_4xx_a_user_error(message: str) -> None:
+    """A dead link is not retryable (ticket #33).
+
+    yt-dlp words an ``HTTPError`` and a ``TransportError`` the same way
+    ("Unable to download webpage: ..."), so a 4xx must match none of the
+    transient phrases and gain no advisory sentence.
+    """
+    from yt_dlp.utils import DownloadError
+
+    with pytest.raises(UserError) as excinfo:
+        _translate_download_error(DownloadError(message))
+
+    assert type(excinfo.value) is UserError
+    assert "running the same command again" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Video unavailable",
+        "Private video",
+        "Unsupported URL",
+        "Incomplete YouTube ID hsLiJP2rqS",
+        # Ambiguous alone: yt-dlp uses it for HTTP errors too.
+        "Unable to download webpage",
+    ],
+)
+def test_translate_download_error_keeps_dead_link_phrases_a_user_error(
+    message: str,
+) -> None:
+    """The explicit not-retryable list keeps the ``user error`` label."""
+    from yt_dlp.utils import DownloadError
+
+    with pytest.raises(UserError) as excinfo:
+        _translate_download_error(DownloadError(message))
+
+    assert type(excinfo.value) is UserError
 
 
 def test_translate_download_error_never_returns_silently() -> None:

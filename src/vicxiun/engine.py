@@ -25,6 +25,7 @@ from yt_dlp.utils import DownloadError
 from vicxiun.errors import (
     PrerequisiteMissing,
     RefusedContent,
+    TransientError,
     UserError,
 )
 from vicxiun.paths import entry_target
@@ -49,6 +50,25 @@ _DRM_PHRASES = (
 _PREREQ_PHRASES = (
     "ffmpeg",
     "node",
+)
+# Phrases that mean "the network failed, the link may be fine". A
+# deliberately short positive list: yt-dlp words an HTTPError and a
+# TransportError the same way ("Unable to download webpage: ..."), so a
+# negative rule ("anything but a 4xx") would guess. A 4xx matches none
+# of these and stays a user error (ticket #33).
+_TRANSIENT_PHRASES = (
+    "timed out",
+    "timeout",
+    "getaddrinfo failed",
+    "temporary failure in name resolution",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "network is unreachable",
+    "remote end closed connection",
+    "incomplete read",
+    "http error 429",
+    "http error 5",
 )
 
 
@@ -400,6 +420,16 @@ def _translate_download_error(exc: DownloadError) -> None:
                 f"a Prerequisite program is missing: {exc}; "
                 "run vicxiun with no arguments to see install instructions",
             ) from exc
+
+    # A network failure is worth another go; a dead link is not. The
+    # advisory sentence is part of the message so the per-Item line and
+    # the summary both carry it with no second mechanism. There is no
+    # retry loop: this only tells the user what to do (ticket #33).
+    if any(phrase in message for phrase in _TRANSIENT_PHRASES):
+        raise TransientError(
+            f"network problem: {exc} — this is usually temporary; "
+            "running the same command again may work."
+        ) from exc
 
     # Anything else is a user-fixable error: the link is bad, the video
     # was removed, etc. We surface the message rather than wrapping it
