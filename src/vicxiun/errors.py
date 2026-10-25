@@ -19,6 +19,14 @@ class UserError(Exception):
     """
 
 
+class TransientError(UserError):
+    """A failure that usually clears up on its own: the network, not the link.
+
+    Exit code: 2 -- via UserError. No new exit code; the public contract
+    in EXIT_CODE is unchanged.
+    """
+
+
 class PrerequisiteMissing(Exception):
     """A Prerequisite program is missing; the tool refuses to proceed.
 

@@ -299,3 +299,21 @@ settings file location inside Termux's private home is standard but
   error (ticket #38). The observed yt-dlp message is hyphenated, so
   `_translate_download_error` normalises hyphens before matching. Cookies
   were withdrawn: do not reintroduce `--cookies` or browser extraction.
+
+## From #33 (A temporary failure says so, and is never retried)
+
+- A network/timeout failure is a `TransientError(UserError)`: label
+  `temporary`, exit 2, and the advice ("... running the same command again
+  may work.") is the message's own tail — which is why the per-Item line
+  and the summary both carry it with no second mechanism to keep in sync.
+  A *resolve*-time failure's per-Item line is bare `str(exc)`, as it is for
+  every named resolve error (pre-existing); its summary line still carries
+  the label.
+- The classifier in `_translate_download_error` is a deliberately short
+  POSITIVE phrase list (`_TRANSIENT_PHRASES`). yt-dlp words an `HTTPError`
+  and a `TransportError` the same way ("Unable to download webpage: ..."),
+  so that string alone is not retryable and every other 4xx stays
+  `user error`. Adding a phrase widens what counts as worth retrying.
+- **No retry loop exists, by decision (#32, option 2).** One resolve and
+  one execute per Item, asserted in `tests/test_queue.py`. Do not turn the
+  sentence into retry/backoff behaviour without a new decision.
