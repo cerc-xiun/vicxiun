@@ -225,6 +225,30 @@ def test_dry_run_exits_zero_for_a_single_valid_link(tmp_path, monkeypatch) -> No
     assert code == 0
 
 
+def test_dry_run_accepts_a_multi_parameter_link_unchanged(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ticket #26: ``&`` is URL data, so every query parameter survives."""
+    link = (
+        "https://www.youtube.com/watch?v=hsLiJP2rqS8"
+        "&list=RDGMEMQ1dJ7wXfLlqCJ7yduJHqQ&index=2&t=42s&si=AbCdEf123"
+    )
+    calls: list[str] = []
+
+    def resolver(url):
+        calls.append(url)
+        return dict(_BASIC_DOWNLOAD)
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+
+    code = main(["--dry-run", "--folder", str(tmp_path), link])
+
+    assert code == 0
+    assert calls == [link]
+    assert link in capsys.readouterr().out
+
+
 def test_dry_run_returns_partial_when_some_links_fail(tmp_path, monkeypatch) -> None:
     """One link bad, one link fine -> partial-success exit code.
 

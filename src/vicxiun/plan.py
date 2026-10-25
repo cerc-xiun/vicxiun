@@ -56,8 +56,11 @@ def _validate_url(url: str) -> str:
         raise InvalidLinkError("a link is required")
     if url.startswith("-"):
         raise InvalidLinkError("a link cannot begin with '-'")
-    # Shell metacharacters that suggest argument injection.
-    shell_metas = ("$", "`", "|", ";", "&", ">", "<", "\n", "\r", "\0")
+    # Shell metacharacters that suggest argument injection. ``&`` is not one
+    # of them: vicxiun never invokes a shell (yt-dlp's Python API, guarded by
+    # the source-level no-shell test), and ``&`` is how a URL carries a
+    # second query parameter (``&list=``, ``&index=``, ``&t=``).
+    shell_metas = ("$", "`", "|", ";", ">", "<", "\n", "\r", "\0")
     if any(m in url for m in shell_metas):
         raise InvalidLinkError("a link contains an unsafe character")
     if not _HTTP_SCHEMES.match(url):

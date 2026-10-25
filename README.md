@@ -167,6 +167,11 @@ vicxiun settings profile best               # save a value
 once are remembered under `vicxiun settings`; a flag on a run overrides a
 saved value and is never saved.
 
+Most share links carry more than one query parameter (`&list=`, `&t=`,
+`&si=`), and vicxiun accepts them exactly as typed — it never strips a
+parameter. In CMD and PowerShell an unquoted `&` is a command separator,
+so quote such a link at the shell level: `vicxiun "https://…&list=…"`.
+
 ## Why captures are MKV, not MP4
 
 A Capture (a live stream) records to MKV; a Download writes MP4. A live

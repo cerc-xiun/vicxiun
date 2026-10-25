@@ -119,6 +119,39 @@ def test_real_run_writes_a_real_file_in_the_uploader_folder(
     assert "1 ok, 0 failed" in captured.err
 
 
+def test_real_run_accepts_a_multi_parameter_link_unchanged(
+    tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ticket #26: resolver and executor both see the link exactly as typed."""
+    link = (
+        "https://www.youtube.com/watch?v=hsLiJP2rqS8"
+        "&list=RDGMEMQ1dJ7wXfLlqCJ7yduJHqQ&index=2&t=42s&si=AbCdEf123"
+    )
+    resolved: list[str] = []
+
+    def resolver(url: str) -> dict[str, object]:
+        resolved.append(url)
+        return dict(_BASIC_DOWNLOAD)
+
+    monkeypatch.setattr(cli, "_resolver", resolver)
+    monkeypatch.setattr(cli, "_prereq_check", lambda: 0)
+    executed: list[str] = []
+
+    def fake_executor(plan, progress):
+        executed.append(plan.url)
+        plan.target_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.target_path.write_bytes(b"x")
+        return plan.target_path
+
+    _install_executor(monkeypatch, fake_executor)
+
+    code = main(["--folder", str(tmp_path), link])
+
+    assert code == 0, capsys.readouterr().err
+    assert resolved == [link]
+    assert executed == [link]
+
+
 def test_real_run_prints_one_line_per_item_describing_the_result(
     tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
